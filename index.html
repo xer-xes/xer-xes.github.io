@@ -7,17 +7,19 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="assets/css/style.css">
+  <script src="assets/js/theme.js"></script>
 </head>
 <body>
 
 <!-- Navigation -->
 <nav>
   <div class="container nav-inner">
-    <div class="nav-logo">r4hul<span>@sec</span>:~$</div>
+    <div class="nav-logo">rahul<span>@sec</span>:~$</div>
     <div class="nav-links">
       <a href="index.html" class="active">home</a>
       <a href="writeups.html">writeups</a>
       <a href="blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
     </div>
   </div>
 </nav>
@@ -26,23 +28,24 @@
 <section class="hero">
   <div class="container">
     <div class="hero-tag">// Security Engineer · Defensive Security</div>
-    <h1>Rahul Sharma<br><span class="accent">Breaking things</span> to defend them better.</h1>
-    <p>Security engineer focused on defensive security. I study offensive techniques on HackTheBox and CTFs to understand how real attacks work — and how to stop them. Writeups and notes here.</p>
+    <h1>Rahul Sharma</h1>
+    <p class="hero-sub">Security Engineer specializing in <span class="accent">defensive security</span>.</p>
+    <p>I study real-world attack techniques through HackTheBox and CTFs to build stronger detections and defenses. This site collects my writeups and security notes.</p>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:40px;">
       <a href="writeups.html" class="btn btn-primary">View Writeups &rarr;</a>
       <a href="blog.html" class="btn btn-ghost">Read Notes</a>
     </div>
     <div class="hero-stats">
       <div class="stat-item">
-        <div class="stat-num" id="machine-count">1</div>
+        <div class="stat-num" id="machine-count">5</div>
         <div class="stat-label">Machines Pwned</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num">2</div>
+        <div class="stat-num">7</div>
         <div class="stat-label">CVEs Exploited</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num">1</div>
+        <div class="stat-num">2</div>
         <div class="stat-label">Blog Posts</div>
       </div>
     </div>
@@ -57,20 +60,20 @@
         <div class="dot dot-r"></div>
         <div class="dot dot-y"></div>
         <div class="dot dot-g"></div>
-        <span class="terminal-title">bash — rahul@kali</span>
+        <span class="terminal-title">zsh — rahul@sec</span>
       </div>
       <div class="terminal-body">
-        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">whoami</span></div>
+        <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">whoami</span></div>
         <div class="t-out">Security Engineer | Defensive Security | CTF player</div>
         <br>
-        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">cat skills.txt</span></div>
+        <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">cat skills.txt</span></div>
         <div class="t-out">Defensive Security | Linux | Python | Burp Suite</div>
         <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
         <br>
-        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
-        <div class="t-success">SmartHIRE/</div>
+        <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
+        <div class="t-success">SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
         <br>
-        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
+        <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
       </div>
     </div>
   </div>
@@ -110,23 +113,99 @@
         </div>
       </div>
 
-      <!-- Placeholder card -->
-      <div class="machine-card" style="opacity:0.4;pointer-events:none;">
+      <!-- Connected -->
+      <div class="machine-card">
         <div class="card-header">
-          <div class="card-os-icon">🪟</div>
+          <div class="card-os-icon">🐧</div>
           <div class="card-badges">
             <span class="badge badge-easy">Easy</span>
-            <span class="badge badge-windows">Windows</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
           </div>
         </div>
-        <div class="card-title">Next Machine...</div>
-        <div class="card-desc">Coming soon. Keep hacking.</div>
+        <div class="card-title">Connected</div>
+        <div class="card-desc">FreePBX VoIP box. Unauthenticated SQLi in the Endpoint Manager (CVE-2025-57819) → cron_jobs INSERT for RCE, then root via a writable incron hook whose signature file is also writable (CVE-2025-61678).</div>
         <div class="card-tags">
-          <span class="tag">???</span>
+          <span class="tag">CVE-2025-57819</span>
+          <span class="tag">CVE-2025-61678</span>
+          <span class="tag">FreePBX</span>
+          <span class="tag">incron</span>
         </div>
         <div class="card-footer">
-          <span class="card-date">TBD</span>
-          <span class="card-link">Coming soon</span>
+          <span class="card-date">2026-06-09</span>
+          <a href="writeups/connected.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- DevHub -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-medium">Medium</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">DevHub</div>
+        <div class="card-desc">Unauthenticated RCE in MCPJam Inspector (CVE-2026-23744), lateral movement via a leaked Jupyter token, then root via a hidden credential-dump endpoint on a root-owned Flask MCP server.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2026-23744</span>
+          <span class="tag">MCP</span>
+          <span class="tag">Jupyter</span>
+          <span class="tag">SSH tunnel</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-06-06</span>
+          <a href="writeups/devhub.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- CCTV -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-easy">Easy</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">CCTV</div>
+        <div class="card-desc">ZoneMinder blind SQLi (CVE-2024-51482) dumps password hashes; a motionEye client-side validation bypass (CVE-2025-60787) yields command injection as root.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2024-51482</span>
+          <span class="tag">CVE-2025-60787</span>
+          <span class="tag">ZoneMinder</span>
+          <span class="tag">motionEye</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-05-26</span>
+          <a href="writeups/cctv.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Reactor -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-easy">Easy</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">Reactor</div>
+        <div class="card-desc">React2Shell (CVE-2025-55182) — unauthenticated RSC deserialization RCE in Next.js. Cracked an MD5 hash for SSH, then escalated via a root Node.js V8 inspector exposed on localhost.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2025-55182</span>
+          <span class="tag">Next.js</span>
+          <span class="tag">V8 inspector</span>
+          <span class="tag">MD5</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-05-25</span>
+          <a href="writeups/reactor.html" class="card-link">Read writeup &rarr;</a>
         </div>
       </div>
 
@@ -176,7 +255,7 @@
 
 <footer>
   <div class="container">
-    <span>r4hul</span> // built for learning, not for show &nbsp;·&nbsp; HTB Writeups &amp; Security Notes
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
   </div>
 </footer>
 

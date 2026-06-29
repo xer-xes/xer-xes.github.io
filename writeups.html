@@ -7,16 +7,18 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="assets/css/style.css">
+  <script src="assets/js/theme.js"></script>
 </head>
 <body>
 
 <nav>
   <div class="container nav-inner">
-    <div class="nav-logo"><a href="index.html" style="color:inherit;">r4hul<span>@sec</span>:~$</a></div>
+    <div class="nav-logo"><a href="index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
     <div class="nav-links">
       <a href="index.html">home</a>
       <a href="writeups.html" class="active">writeups</a>
       <a href="blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
     </div>
   </div>
 </nav>
@@ -66,6 +68,103 @@
       </div>
     </div>
 
+    <div class="machine-card" data-diff="easy" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">Connected</div>
+      <div class="card-desc">VoIP box running FreePBX 16. An unauthenticated SQL injection in the Endpoint Manager (CVE-2025-57819) dumps admin hashes and writes to the cron_jobs table for RCE; root via a writable incron hook whose signature file is also writable (CVE-2025-61678).</div>
+      <div class="card-tags">
+        <span class="tag">CVE-2025-57819</span>
+        <span class="tag">CVE-2025-61678</span>
+        <span class="tag">FreePBX</span>
+        <span class="tag">SQLi</span>
+        <span class="tag">cron_jobs RCE</span>
+        <span class="tag">incron</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-06-09</span>
+        <a href="writeups/connected.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
+    <div class="machine-card" data-diff="medium" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">DevHub</div>
+      <div class="card-desc">Internal developer platform. Unauthenticated RCE in MCPJam Inspector (CVE-2026-23744), lateral movement via a leaked Jupyter token, then root through a hidden credential-dump endpoint on a root-owned Flask MCP server.</div>
+      <div class="card-tags">
+        <span class="tag">CVE-2026-23744</span>
+        <span class="tag">MCP</span>
+        <span class="tag">Jupyter</span>
+        <span class="tag">SSH tunnel</span>
+        <span class="tag">hidden API</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-06-06</span>
+        <a href="writeups/devhub.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
+    <div class="machine-card" data-diff="easy" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">CCTV</div>
+      <div class="card-desc">Surveillance-themed chain across two camera apps: ZoneMinder blind SQLi (CVE-2024-51482) dumps hashes, then a motionEye client-side validation bypass (CVE-2025-60787) gives command injection as root.</div>
+      <div class="card-tags">
+        <span class="tag">CVE-2024-51482</span>
+        <span class="tag">CVE-2025-60787</span>
+        <span class="tag">ZoneMinder</span>
+        <span class="tag">Blind SQLi</span>
+        <span class="tag">motionEye</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-05-26</span>
+        <a href="writeups/cctv.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
+    <div class="machine-card" data-diff="easy" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">Reactor</div>
+      <div class="card-desc">Next.js dashboard hit with React2Shell (CVE-2025-55182), an unauthenticated RSC deserialization RCE. Cracked an MD5 hash for SSH, then escalated via a root Node.js process exposing the V8 inspector on localhost.</div>
+      <div class="card-tags">
+        <span class="tag">CVE-2025-55182</span>
+        <span class="tag">Next.js</span>
+        <span class="tag">RSC</span>
+        <span class="tag">V8 inspector</span>
+        <span class="tag">MD5</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-05-25</span>
+        <a href="writeups/reactor.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
     <!-- Add more machine cards above this comment as you complete more boxes -->
 
   </div>
@@ -79,7 +178,7 @@
 <br><br>
 <footer>
   <div class="container">
-    <span>r4hul</span> // HTB Writeups &amp; Security Notes
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
   </div>
 </footer>
 

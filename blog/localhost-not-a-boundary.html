@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Localhost Is Not a Security Boundary // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      localhost-not-a-boundary
+    </div>
+    <h1 style="margin-top:16px;">Localhost Is Not a Security Boundary</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-06-10 &nbsp;·&nbsp; defense &nbsp;·&nbsp; network &nbsp;·&nbsp; htb-lessons</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>"It's only bound to <code>127.0.0.1</code>, so it's fine." I've heard this from developers, and I used to half-believe it myself. Then I rooted three HackTheBox machines in a row — <a href="../writeups/reactor.html">Reactor</a>, <a href="../writeups/cctv.html">CCTV</a>, and <a href="../writeups/devhub.html">DevHub</a> — where the entire privilege-escalation path was a service that "only listened on localhost." This post is the defensive lesson I took away from all three.</p>
+
+    <h2>The comforting lie</h2>
+    <p>Binding to <code>127.0.0.1</code> (or <code>::1</code>) means a service won't accept packets that arrive on an external interface. That's a real and useful property — it keeps the port off your external <code>nmap</code> scan. But it protects against exactly one thing: <strong>remote attackers who are not yet on the host and have no way to pivot through it.</strong></p>
+    <p>It does <em>nothing</em> against:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li>A low-privilege local user who already has a shell (every post-exploitation scenario).</li>
+      <li>Anyone who can open an <strong>SSH tunnel</strong> to the box.</li>
+      <li>SSRF, a reverse proxy misroute, or a second vulnerable service that can reach loopback for you.</li>
+    </ul>
+    <p>In other words, loopback binding is a <em>reachability</em> control, not an <em>authorization</em> control. The moment an attacker is "inside" — even as <code>www-data</code> — localhost is wide open.</p>
+
+    <h2>Three boxes, one pattern</h2>
+
+    <h3>Reactor — a root debugger on 127.0.0.1:9229</h3>
+    <p>A Node.js process was running as root with <code>--inspect=127.0.0.1:9229</code>. The V8 inspector is a full code-execution interface: connect a WebSocket, send <code>Runtime.evaluate</code>, and your JavaScript runs in that process — as root. "Localhost only" was the sole compensating control, and a one-line SSH forward erased it:</p>
+    <pre>ssh -L 9229:127.0.0.1:9229 engineer@target
+# now my laptop talks straight to the root debugger</pre>
+
+    <h3>CCTV — motionEye behind the firewall</h3>
+    <p>The path to root ran entirely through <strong>motionEye on 127.0.0.1:8765</strong>, completely invisible to an external scan. After landing a foothold as <code>mark</code>, <code>ss -tlnp</code> revealed it; an SSH forward put it in my browser; a config-injection CVE turned it into a root shell.</p>
+
+    <h3>DevHub — a Jupyter token and a root Flask app</h3>
+    <p>Two loopback services: a Jupyter Lab on <code>:8888</code> (token leaked in <code>ps aux</code>) and a root-owned Flask "OPSMCP" server on <code>:5000</code> with a hidden credential-dump endpoint. Both "internal only." Both forwarded and abused in minutes.</p>
+
+    <pre># the enumeration command that mattered every single time
+ss -tlnp        # or: netstat -tlnp
+# anything on 127.0.0.1 is now your local attack surface</pre>
+
+    <h2>Why this keeps happening</h2>
+    <p>Localhost binding feels like a security decision because it makes the port "disappear." Developers reach for it to expose admin panels, debuggers, and internal APIs without "putting them on the internet." The mental model is a perimeter — inside trusted, outside hostile. But a single RCE collapses that perimeter, and everything that trusted "being on the same host" is now in scope.</p>
+
+    <h2>Defending it properly</h2>
+    <p>If you own these systems, treat loopback services as <em>authenticated, least-privilege</em> services — same as anything public:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Authenticate and authorize everything</strong>, even on localhost. The debugger, the admin API, the metrics endpoint — all of it.</li>
+      <li><strong>Never run debug interfaces in production.</strong> <code>--inspect</code>, Werkzeug's debugger, Jupyter with a static token: these are RCE-as-a-feature. Gate them behind a build flag.</li>
+      <li><strong>Drop privileges.</strong> A monitoring worker or an MCP server has no reason to run as root. If Reactor's Node process ran as a service account, the inspector would only have given an attacker that account.</li>
+      <li><strong>Keep secrets out of <code>argv</code>.</strong> Jupyter's token sat in plaintext process arguments, readable by any local user via <code>ps</code>. Use env files, config with strict perms, or stdin.</li>
+      <li><strong>Restrict who can tunnel.</strong> Lock down SSH (keys, <code>AllowTcpForwarding no</code> where feasible), and segment so a foothold can't trivially reach sensitive loopback ports.</li>
+      <li><strong>Monitor for the tells.</strong> New listeners on loopback, unexpected <code>ssh -L</code> forwards, and connections to debugger ports (9229, 5678) are cheap, high-signal detections.</li>
+    </ul>
+
+    <h2>The takeaway</h2>
+    <p>"Bound to localhost" answers the question <em>"can a stranger on the internet hit this?"</em> — not <em>"is this safe?"</em> Defense-in-depth means assuming the attacker is already on the host, because in every interesting incident, eventually they are. Build every internal service as if it were facing the public internet, because the day someone pops a shell, it effectively is.</p>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Blog</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>
