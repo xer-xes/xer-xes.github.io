@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rahul Sharma // Security Researcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo">r4hul<span>@sec</span>:~$</div>
+    <div class="nav-links">
+      <a href="index.html" class="active">home</a>
+      <a href="writeups.html">writeups</a>
+      <a href="blog.html">blog</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-tag">// Security Researcher & CTF Player</div>
+    <h1>Rahul Sharma<br><span class="accent">Breaking things,</span> learning more.</h1>
+    <p>Penetration tester and CTF enthusiast. I document my HackTheBox machines, security research, and notes here.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:40px;">
+      <a href="writeups.html" class="btn btn-primary">View Writeups &rarr;</a>
+      <a href="blog.html" class="btn btn-ghost">Read Notes</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat-item">
+        <div class="stat-num" id="machine-count">1</div>
+        <div class="stat-label">Machines Pwned</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">2</div>
+        <div class="stat-label">CVEs Exploited</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num">1</div>
+        <div class="stat-label">Blog Posts</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Terminal -->
+<section class="section" style="padding-top:40px;padding-bottom:0;">
+  <div class="container">
+    <div class="terminal" style="max-width:620px;">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div>
+        <div class="dot dot-y"></div>
+        <div class="dot dot-g"></div>
+        <span class="terminal-title">bash — rahul@kali</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">whoami</span></div>
+        <div class="t-out">Security researcher | CTF player | HTB enthusiast</div>
+        <br>
+        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">cat skills.txt</span></div>
+        <div class="t-out">Web Pentesting | Linux PrivEsc | Python | Burp Suite</div>
+        <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
+        <br>
+        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
+        <div class="t-success">SmartHIRE/</div>
+        <br>
+        <div><span class="t-prompt">rahul@kali</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Recent Writeups -->
+<section class="section">
+  <div class="container">
+    <div class="section-header">
+      <h2>Recent Writeups</h2>
+      <p>Latest HackTheBox machines I've completed</p>
+    </div>
+    <div class="cards-grid">
+
+      <!-- SmartHIRE -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-medium">Medium</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">SmartHIRE</div>
+        <div class="card-desc">AI hiring platform running Flask + MLflow. Exploited pickle deserialization (CVE-2024-37054) for initial access, then escalated via Python .pth file hijack.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2024-37054</span>
+          <span class="tag">Pickle RCE</span>
+          <span class="tag">MLflow</span>
+          <span class="tag">.pth hijack</span>
+          <span class="tag">sudo privesc</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-06-28</span>
+          <a href="writeups/smarthire.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Placeholder card -->
+      <div class="machine-card" style="opacity:0.4;pointer-events:none;">
+        <div class="card-header">
+          <div class="card-os-icon">🪟</div>
+          <div class="card-badges">
+            <span class="badge badge-easy">Easy</span>
+            <span class="badge badge-windows">Windows</span>
+          </div>
+        </div>
+        <div class="card-title">Next Machine...</div>
+        <div class="card-desc">Coming soon. Keep hacking.</div>
+        <div class="card-tags">
+          <span class="tag">???</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">TBD</span>
+          <span class="card-link">Coming soon</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- About -->
+<section class="section" style="border-top:1px solid var(--border);">
+  <div class="container">
+    <div class="section-header">
+      <h2>About Me</h2>
+    </div>
+    <div class="about-grid">
+      <div>
+        <p>I'm Rahul, a security enthusiast learning penetration testing through HackTheBox and CTF competitions. I document every machine I pwn to reinforce what I learn and help others.</p>
+        <p style="margin-top:12px;">Currently focused on web application security, Linux privilege escalation, and understanding how real-world vulnerabilities work end to end.</p>
+        <div class="skills-list">
+          <span class="skill-chip">Burp Suite</span>
+          <span class="skill-chip">Python</span>
+          <span class="skill-chip">Linux</span>
+          <span class="skill-chip">Web Pentesting</span>
+          <span class="skill-chip">Flask</span>
+          <span class="skill-chip">MLflow</span>
+          <span class="skill-chip">Reverse Shells</span>
+          <span class="skill-chip">Pickle / Deserialization</span>
+          <span class="skill-chip">Privilege Escalation</span>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:14px;">Find me on</h3>
+        <div class="social-links">
+          <a href="https://github.com/" class="social-link" target="_blank">
+            <span class="social-icon">⌥</span> GitHub
+          </a>
+          <a href="https://app.hackthebox.com/" class="social-link" target="_blank">
+            <span class="social-icon">⬡</span> HackTheBox Profile
+          </a>
+          <a href="mailto:unirahulsharma@gmail.com" class="social-link">
+            <span class="social-icon">✉</span> unirahulsharma@gmail.com
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <span>r4hul</span> // built for learning, not for show &nbsp;·&nbsp; HTB Writeups &amp; Security Notes
+  </div>
+</footer>
+
+<style>
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+</style>
+
+</body>
+</html>

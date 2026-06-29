@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blog // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="index.html" style="color:inherit;">r4hul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="index.html">home</a>
+      <a href="writeups.html">writeups</a>
+      <a href="blog.html" class="active">blog</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb"><a href="index.html">~</a> <span class="sep">/</span> blog</div>
+    <h1>Notes &amp; Research</h1>
+    <p style="color:var(--text-dim);margin-top:8px;">Security notes, techniques I've learned, and things worth documenting.</p>
+  </div>
+
+  <div class="blog-list">
+
+    <a href="blog/python-pth-privesc.html" style="text-decoration:none;color:inherit;">
+      <div class="blog-card">
+        <div class="blog-num">01</div>
+        <div class="blog-content">
+          <div class="blog-title">Python .pth Files as a Privilege Escalation Vector</div>
+          <div class="blog-excerpt">When a Python script runs as root and calls site.addsitedir() on a user-writable directory, any .pth file containing an import statement becomes arbitrary code execution. Here's how it works and how to find it.</div>
+          <div class="blog-meta">
+            <span>2026-06-28</span>
+            <span>·</span>
+            <span>privesc</span>
+            <span>·</span>
+            <span>python</span>
+          </div>
+        </div>
+      </div>
+    </a>
+
+    <!-- Add more blog posts above this comment -->
+
+    <div class="blog-card" style="opacity:0.4;pointer-events:none;">
+      <div class="blog-num">02</div>
+      <div class="blog-content">
+        <div class="blog-title">Coming soon...</div>
+        <div class="blog-excerpt">More notes being written.</div>
+        <div class="blog-meta"><span>TBD</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    <span>r4hul</span> // HTB Writeups &amp; Security Notes
+  </div>
+</footer>
+
+</body>
+</html>
