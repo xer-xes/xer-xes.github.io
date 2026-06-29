@@ -84,7 +84,7 @@
 Vary: RSC, Next-Router-State-Tree, Next-Router-Prefetch</pre>
     <p>The <code>Vary: RSC</code> header confirms React Server Components are active. Next.js 15.0.3 is below the patched 15.0.5 — vulnerable.</p>
 
-    <h2>Initial Foothold — CVE-2025-55182 (React2Shell)</h2>
+    <h2>Initial Access — CVE-2025-55182 (React2Shell)</h2>
     <p>Disclosed Dec 2025 with a CVSS of 10.0, the bug lives in the RSC Flight protocol deserializer. A crafted payload abuses prototype pollution to reach the <code>Function()</code> constructor and execute server-side code with no auth. The Flight payload chains three references:</p>
     <pre>{
   "then": "$1:__proto__:then",

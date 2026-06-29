@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<!--
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  HTB WRITEUP TEMPLATE                                                  │
+  │  Copy this file to writeups/<machine>.html and fill in the blanks.    │
+  │                                                                       │
+  │  Canonical section order (keep 1,2,3,5,6,7,8 — flex section 4):       │
+  │    1. Summary             — 2-3 sentence chain overview (ordered list)│
+  │    2. Reconnaissance      — nmap + service/version fingerprinting     │
+  │    3. Initial Access      — foothold CVE/technique -> first shell     │
+  │    4. [chain-specific]    — FLEXIBLE: enumeration / lateral movement / │
+  │                             credential discovery (rename as needed)    │
+  │    5. Privilege Escalation— path to root                              │
+  │    6. Flags               — ALWAYS redacted: HTB{… redacted …}        │
+  │    7. Findings Summary    — severity table                           │
+  │    8. Defensive Takeaways — blue-team lessons                         │
+  │                                                                       │
+  │  Difficulty badge classes: badge-easy / badge-medium / badge-hard /   │
+  │                            badge-insane  (+ badge-linux / badge-windows)│
+  │  Severity spans: severity-critical / severity-high / severity-medium  │
+  └─────────────────────────────────────────────────────────────────────┘
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MACHINE Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      MACHINE
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div> <!-- 🐧 Linux · 🪟 Windows -->
+      <div>
+        <h1 style="margin-bottom:6px;">MACHINE</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">YYYY-MM-DD</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — distro</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">key software / versions</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-XXXX-XXXXX (short description)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>One-line framing of the box, then the chain as an ordered list:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — how the first foothold was obtained.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — how root/SYSTEM was obtained.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sC -sV -p- TARGET
+# paste relevant open ports / versions here</pre>
+    <p>What the recon revealed and which thread you pulled first.</p>
+
+    <h2>Initial Access — CVE-XXXX-XXXXX</h2>
+    <p>Explain the vulnerability and why it works, then the exploitation steps.</p>
+    <pre># exploit / request / payload</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">connect from TARGET ...</div>
+        <div class="t-success">user@MACHINE:~$ id</div>
+      </div>
+    </div>
+
+    <!-- ── SECTION 4: FLEXIBLE ──────────────────────────────────────────
+         Add the machine-specific middle steps here. Common variants:
+           <h2>Local Enumeration</h2>
+           <h2>Lateral Movement — userA → userB</h2>
+           <h2>Credential Discovery</h2>
+         Delete this comment and use whatever the chain actually needs.
+    ──────────────────────────────────────────────────────────────────── -->
+
+    <h2>Privilege Escalation</h2>
+    <p>The misconfiguration / technique and the steps to root.</p>
+    <pre># privesc steps</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">user@MACHINE</span>:~$ <span class="t-cmd"># escalate</span></div>
+        <div class="t-success"># id</div>
+        <div class="t-success">uid=0(root) gid=0(root) groups=0(root)</div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/USER/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>FINDING</td><td><span class="severity-critical">Critical</span></td><td>IMPACT</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Lesson.</strong> Why it matters and how a defender prevents/detects it.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

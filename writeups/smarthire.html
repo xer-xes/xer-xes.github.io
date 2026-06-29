@@ -101,7 +101,7 @@
     <pre>curl -s -u admin:password http://models.smarthire.htb/
 # Returns: MLflow 2.14.1</pre>
 
-    <h2>Exploitation — CVE-2024-37054 (Pickle RCE)</h2>
+    <h2>Initial Access — CVE-2024-37054 (Pickle RCE)</h2>
 
     <h3>What is Pickle Deserialization?</h3>
     <p>Python's <code>pickle.loads()</code> doesn't just restore data — it executes Python opcodes. A crafted payload using <code>__reduce__</code> can run arbitrary OS commands the moment the object is deserialized:</p>
@@ -216,7 +216,7 @@ whoami  # root</pre>
       </tbody>
     </table>
 
-    <h2>Key Lessons</h2>
+    <h2>Defensive Takeaways</h2>
     <ul style="margin-left:20px;color:var(--text);line-height:2;">
       <li><strong>Pickle = code execution.</strong> Never deserialize untrusted data. Protect artifact storage.</li>
       <li><strong>Default credentials</strong> are as dangerous as hardcoded passwords.</li>

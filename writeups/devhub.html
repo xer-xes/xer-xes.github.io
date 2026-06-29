@@ -84,7 +84,7 @@ PORT     STATE SERVICE  VERSION
 6274/tcp open  http     MCPJam Inspector v1.4.2</pre>
     <p>The port-80 homepage helpfully enumerates internal services: the MCP Inspector on 6274, an "Analytics Dashboard" on <code>localhost:8888</code> (Jupyter), and a code repo in maintenance mode. Information disclosure on the landing page is the first thread to pull.</p>
 
-    <h2>Initial Foothold — CVE-2026-23744</h2>
+    <h2>Initial Access — CVE-2026-23744</h2>
     <p>MCPJam Inspector is a debugging tool for tracing JSON-RPC across Model Context Protocol systems. Version 1.4.2 exposes unauthenticated REST endpoints, and <code>/api/mcp/connect</code> forwards a <code>command</code> + <code>args</code> pair to the OS process spawner without sanitisation. The key detail is that <code>command</code> and <code>args</code> must be <strong>separate JSON fields</strong>.</p>
 
     <pre>import requests

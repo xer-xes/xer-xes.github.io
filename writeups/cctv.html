@@ -83,7 +83,7 @@ PORT   STATE SERVICE
     <pre>echo '10.129.4.31  cctv.htb' | sudo tee -a /etc/hosts</pre>
     <p>The site presents a <strong>ZoneMinder</strong> login, version <code>1.37.63</code> visible on the page.</p>
 
-    <h2>ZoneMinder — Default Creds &amp; CVE-2024-51482</h2>
+    <h2>Initial Access — ZoneMinder (Default Creds &amp; CVE-2024-51482)</h2>
     <p>Always try defaults first: <code>admin:admin</code> works. The admin panel reveals three users (<code>admin</code>, <code>mark</code>, <code>superadmin</code>). ZoneMinder 1.37.63 is vulnerable to <strong>CVE-2024-51482</strong>, a boolean-based blind SQL injection that extracts data one bit at a time:</p>
     <pre>python3 CVE-2024-51482.py -i cctv.htb -u admin -p admin --users
 
@@ -116,7 +116,7 @@ cat /etc/motioneye/motion.conf
 # @admin_password 989c5a8ee87a0e9521ec81a79187d162109282f0</pre>
     <p>motionEye uses the stored <strong>SHA1 hash itself</strong> as the login password — paste the hex string directly into the form to authenticate as <code>admin</code>.</p>
 
-    <h2>RCE — CVE-2025-60787</h2>
+    <h2>Privilege Escalation — motionEye RCE (CVE-2025-60787)</h2>
     <p>motionEye writes user-supplied values into the motion daemon config without sanitisation; on restart, the daemon evaluates shell syntax embedded in fields like the image filename template. The browser-side <code>configUiValid</code> check is the only guard — and it runs in <em>your</em> browser:</p>
     <pre>// browser console (F12)
 configUiValid = function() { return true; };</pre>
