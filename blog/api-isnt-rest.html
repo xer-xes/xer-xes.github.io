@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>When the API Isn't REST // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      api-isnt-rest
+    </div>
+    <h1 style="margin-top:16px;">When the API Isn't REST: Reversing a Connect-RPC Frontend to Reach a Hidden Endpoint</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-07-04 &nbsp;·&nbsp; web &nbsp;·&nbsp; api &nbsp;·&nbsp; recon</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>On <a href="../writeups/enigma.html">Enigma</a>, root came from a <a href="https://olivetin.app">OliveTin</a> instance running as root with an action whose <code>password</code>-typed argument was interpolated straight into a shell command — a clean command injection. The <em>vulnerability</em> took two minutes to spot. What actually cost me an hour was something dumber and more useful to write down: <strong>I couldn't figure out how to call the API.</strong> Every request I sent came back the same way, and the reason is a trap worth internalizing — modern web apps frequently don't speak REST at all.</p>
+
+    <h2>The symptom: a field that's always empty</h2>
+    <p>The exploit needed me to trigger an action by ID. The obvious REST-shaped call looked right and failed:</p>
+    <pre>curl -s -X POST http://127.0.0.1:1337/api/StartAction \
+  -H "Content-Type: application/json" \
+  -d '{"actionId":"backup_database"}'
+
+{"code":"not_found","message":"action with ID  not found"}</pre>
+    <p>Read that error carefully — the crucial clue is the <strong>double space</strong> before "not found". If the ID had been wrong, it would say <code>action with ID backup_database not found</code>. Instead the ID arrives <em>blank</em>. The endpoint exists (it's not a 404), the handler runs, but it never sees my <code>actionId</code>. I tried every casing — <code>action_id</code>, <code>actionName</code>, <code>id</code>, path parameters, query strings — all blank. When a body field is <em>universally</em> ignored, the body isn't being parsed the way you think it is.</p>
+
+    <h2>The cause: it's Connect RPC, not REST</h2>
+    <p>The tell was in how the frontend was built. Grepping the compiled JS bundle for how the client is constructed:</p>
+    <pre>grep -rhoE ".{60}window.client.{80}" assets/index-*.js
+
+...o_({baseUrl: location.protocol+"//"+location.host+"/api/"});
+   window.client = O0(a_, e); window.initResponse = await window.client.init({});</pre>
+    <p>That <code>createTransport(&#123;baseUrl&#125;)</code> + <code>createClient(service, transport)</code> shape is <a href="https://connectrpc.com">Connect RPC</a> (the successor to gRPC-web). These apps look like they have a REST API — endpoints under <code>/api/</code> that return JSON — but they are <strong>RPC methods generated from a protobuf schema</strong>. The URL is <code>/api/&lt;Method&gt;</code>, the body must match the protobuf message's field names, and unary JSON calls generally expect a protocol header. Miss any of that and the message deserializes to an empty struct — exactly the blank field I was seeing.</p>
+
+    <h2>The fix: read the client, don't guess the server</h2>
+    <p>The compiled frontend is the authoritative API documentation. It already knows the method names, the exact field names, and the transport. Two greps gave me everything:</p>
+    <pre># what methods does the client expose?
+grep -rhoE "client\.[a-zA-Z]+\(" assets/*.js | sort -u
+# ... startAction( getActionBinding( init( whoAmI( ...
+
+# what object shape does startAction actually take?
+grep -rhoE ".{40}startAction\(" assets/*.js
+# ...const o={bindingId:w.bindingId, arguments:t, uniqueTrackingId:$()};
+#    await window.client.startAction(o)</pre>
+    <p>Two corrections fell out of that. First, the field is <strong><code>bindingId</code></strong>, not <code>actionId</code> — OliveTin references actions by their runtime <em>binding</em>, and the config <code>id</code> happens to be usable as one. Second, the request needs the Connect protocol header. I confirmed the calling convention against a harmless read method first (<code>Init</code>), then replayed it:</p>
+    <pre>curl -s -X POST http://127.0.0.1:1337/api/StartAction \
+  -H "Content-Type: application/json" \
+  -H "Connect-Protocol-Version: 1" \
+  -d '{"bindingId":"backup_database","arguments":[...]}'
+
+{"executionTrackingId":"c29482bf-aad5-4f13-810c-a1c33c136c17"}</pre>
+    <p>A tracking ID instead of a blank error — the message parsed, and root ran my command.</p>
+
+    <h2>Recognizing this in the wild</h2>
+    <p>Before you burn time crafting REST payloads, check whether you're even looking at REST. Signs you're facing Connect / gRPC-web / tRPC rather than a plain JSON API:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li>Every endpoint is <strong>POST</strong>, even reads, and paths look like verbs: <code>/api/GetThings</code>, <code>/service/Method</code> — not resource nouns like <code>/api/things/42</code>.</li>
+      <li>Request/response <code>Content-Type</code> is <code>application/json</code>, <code>application/connect+json</code>, or <code>application/grpc-web+proto</code>, sometimes with a <code>Connect-Protocol-Version</code> or <code>grpc-*</code> header.</li>
+      <li>The frontend bundle mentions <code>@connectrpc</code>, <code>createPromiseClient</code>, <code>createConnectTransport</code>, <code>grpc-web</code>, or <code>@trpc</code>.</li>
+      <li>A field you send is silently ignored and the server behaves as if the message were empty (schema mismatch, not a value error).</li>
+    </ul>
+
+    <h2>The methodology, generalized</h2>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Treat the compiled JS as the API spec.</strong> Minified isn't obfuscated — <code>grep</code> for <code>client.</code>, method names, and the object literals passed into them. The exact wire field names are right there.</li>
+      <li><strong>Calibrate on a benign method first.</strong> Get a harmless read call (<code>init</code>, <code>whoAmI</code>) working to nail down the transport and headers, then swap in the dangerous method with confidence.</li>
+      <li><strong>Read error messages as oracles.</strong> A <em>blank</em> value in an error ("ID&nbsp;&nbsp;not found") means a parsing/binding problem; an <em>echoed</em> value means the server read you and the value is simply wrong. Those two failure modes point in completely different directions.</li>
+      <li><strong>Look for RPC methods the UI never calls.</strong> Once you speak the protocol, the service exposes every method in the schema — including ones with no button in the UI. "Not in the interface" is not "not callable."</li>
+    </ul>
+
+    <h2>The takeaway</h2>
+    <p>The injection on Enigma was trivial; the real skill was refusing to accept "the exploit doesn't work" when the exploit was fine and my <em>transport assumption</em> was wrong. When an API won't answer, question the protocol before you question the payload — and let the frontend, which already knows how to talk to the server, teach you how.</p>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Blog</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+</body>
+</html>

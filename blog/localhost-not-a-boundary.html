@@ -35,7 +35,7 @@
   </div>
 
   <div class="writeup-body">
-    <p>"It's only bound to <code>127.0.0.1</code>, so it's fine." I've heard this from developers, and I used to half-believe it myself. Then I rooted three HackTheBox machines in a row — <a href="../writeups/reactor.html">Reactor</a>, <a href="../writeups/cctv.html">CCTV</a>, and <a href="../writeups/devhub.html">DevHub</a> — where the entire privilege-escalation path was a service that "only listened on localhost." This post is the defensive lesson I took away from all three.</p>
+    <p>"It's only bound to <code>127.0.0.1</code>, so it's fine." I've heard this from developers, and I used to half-believe it myself. Then I rooted four HackTheBox machines in a row — <a href="../writeups/reactor.html">Reactor</a>, <a href="../writeups/cctv.html">CCTV</a>, <a href="../writeups/devhub.html">DevHub</a>, and <a href="../writeups/enigma.html">Enigma</a> — where the entire privilege-escalation path was a service that "only listened on localhost." This post is the defensive lesson I took away from all four.</p>
 
     <h2>The comforting lie</h2>
     <p>Binding to <code>127.0.0.1</code> (or <code>::1</code>) means a service won't accept packets that arrive on an external interface. That's a real and useful property — it keeps the port off your external <code>nmap</code> scan. But it protects against exactly one thing: <strong>remote attackers who are not yet on the host and have no way to pivot through it.</strong></p>
@@ -47,7 +47,7 @@
     </ul>
     <p>In other words, loopback binding is a <em>reachability</em> control, not an <em>authorization</em> control. The moment an attacker is "inside" — even as <code>www-data</code> — localhost is wide open.</p>
 
-    <h2>Three boxes, one pattern</h2>
+    <h2>Four boxes, one pattern</h2>
 
     <h3>Reactor — a root debugger on 127.0.0.1:9229</h3>
     <p>A Node.js process was running as root with <code>--inspect=127.0.0.1:9229</code>. The V8 inspector is a full code-execution interface: connect a WebSocket, send <code>Runtime.evaluate</code>, and your JavaScript runs in that process — as root. "Localhost only" was the sole compensating control, and a one-line SSH forward erased it:</p>
@@ -59,6 +59,9 @@
 
     <h3>DevHub — a Jupyter token and a root Flask app</h3>
     <p>Two loopback services: a Jupyter Lab on <code>:8888</code> (token leaked in <code>ps aux</code>) and a root-owned Flask "OPSMCP" server on <code>:5000</code> with a hidden credential-dump endpoint. Both "internal only." Both forwarded and abused in minutes.</p>
+
+    <h3>Enigma — a root action-runner on 127.0.0.1:1337</h3>
+    <p>The privesc was <strong>OliveTin bound to <code>127.0.0.1:1337</code>, running as root</strong> — a web UI that executes predefined shell commands. Invisible externally, and "guest exec" was left enabled. One of its actions passed an unsanitised argument into a shell, so a single request from my <code>haris</code> shell made root run my command. Loopback was, again, the only thing standing between a local user and root.</p>
 
     <pre># the enumeration command that mattered every single time
 ss -tlnp        # or: netstat -tlnp

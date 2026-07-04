@@ -43,6 +43,32 @@
   <!-- Cards -->
   <div class="cards-grid" id="writeup-grid">
 
+    <div class="machine-card" data-diff="easy" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">Enigma</div>
+      <div class="card-desc">Mail-themed credential-flow box. An anonymous NFS export leaks onboarding creds; webmail password reuse surfaces OpenSTAManager admin creds, exploited via CVE-2025-69212 (P7M command injection). Config/DB creds crack a user hash, then a root-run OliveTin action with an unsanitised password argument is command-injected via Connect RPC for root.</div>
+      <div class="card-tags">
+        <span class="tag">CVE-2025-69212</span>
+        <span class="tag">NFS</span>
+        <span class="tag">password reuse</span>
+        <span class="tag">OpenSTAManager</span>
+        <span class="tag">bcrypt</span>
+        <span class="tag">OliveTin</span>
+        <span class="tag">command injection</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-07-04</span>
+        <a href="writeups/enigma.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
     <div class="machine-card" data-diff="medium" data-os="linux">
       <div class="card-header">
         <div class="card-os-icon">🐧</div>
