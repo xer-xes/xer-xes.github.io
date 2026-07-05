@@ -43,6 +43,31 @@
   <!-- Cards -->
   <div class="cards-grid" id="writeup-grid">
 
+    <div class="machine-card" data-diff="medium" data-os="linux">
+      <div class="card-header">
+        <div class="card-os-icon">🐧</div>
+        <div class="card-badges">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+      <div class="card-title">MakeSense</div>
+      <div class="card-desc">WordPress box built on client-side trust. A theme ships its own AES key, so a forged "voice message" plants a stored XSS an admin bot renders — creating an admin and a plugin-upload webshell. A reused wp-config password gives SSH; root falls to a root-owned OCR service that saves recognised text to a web-served .php file, so Tesseract writes the webshell.</div>
+      <div class="card-tags">
+        <span class="tag">WordPress</span>
+        <span class="tag">client-side crypto</span>
+        <span class="tag">stored XSS</span>
+        <span class="tag">admin bot</span>
+        <span class="tag">password reuse</span>
+        <span class="tag">OCR RCE</span>
+      </div>
+      <div class="card-footer">
+        <span class="card-date">2026-07-05</span>
+        <a href="writeups/makesense.html" class="card-link">Read writeup &rarr;</a>
+      </div>
+    </div>
+
     <div class="machine-card" data-diff="easy" data-os="linux">
       <div class="card-header">
         <div class="card-os-icon">🐧</div>

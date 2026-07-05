@@ -32,9 +32,26 @@
 
   <div class="blog-list">
 
-    <a href="blog/api-isnt-rest.html" style="text-decoration:none;color:inherit;">
+    <a href="blog/client-side-trust.html" style="text-decoration:none;color:inherit;">
       <div class="blog-card">
         <div class="blog-num">01</div>
+        <div class="blog-content">
+          <div class="blog-title">The Client Is Not Your Server: When Encryption Keys Ship in JavaScript</div>
+          <div class="blog-excerpt">MakeSense shipped its AES key in client JavaScript and sanitised input in the browser — so I forged the "encrypted" payload and skipped the checks entirely. Why a shared secret in the client is obfuscation, not encryption, and where your trust boundary actually is.</div>
+          <div class="blog-meta">
+            <span>2026-07-05</span>
+            <span>·</span>
+            <span>web</span>
+            <span>·</span>
+            <span>appsec</span>
+          </div>
+        </div>
+      </div>
+    </a>
+
+    <a href="blog/api-isnt-rest.html" style="text-decoration:none;color:inherit;">
+      <div class="blog-card">
+        <div class="blog-num">02</div>
         <div class="blog-content">
           <div class="blog-title">When the API Isn't REST: Reversing a Connect-RPC Frontend</div>
           <div class="blog-excerpt">A root-run OliveTin on Enigma had a trivial command injection — but the exploit "didn't work" because the API wasn't REST. How to recognize Connect / gRPC-web frontends and read the compiled JS to find the real wire format (and endpoints the UI never calls).</div>
@@ -53,7 +70,7 @@
 
     <a href="blog/python-pth-privesc.html" style="text-decoration:none;color:inherit;">
       <div class="blog-card">
-        <div class="blog-num">02</div>
+        <div class="blog-num">03</div>
         <div class="blog-content">
           <div class="blog-title">Python .pth Files as a Privilege Escalation Vector</div>
           <div class="blog-excerpt">When a Python script runs as root and calls site.addsitedir() on a user-writable directory, any .pth file containing an import statement becomes arbitrary code execution. Here's how it works and how to find it.</div>
@@ -70,7 +87,7 @@
 
     <a href="blog/localhost-not-a-boundary.html" style="text-decoration:none;color:inherit;">
       <div class="blog-card">
-        <div class="blog-num">03</div>
+        <div class="blog-num">04</div>
         <div class="blog-content">
           <div class="blog-title">Localhost Is Not a Security Boundary</div>
           <div class="blog-excerpt">Three HTB boxes in a row gave me root through a service that "only listened on 127.0.0.1." Why loopback binding is a reachability control — not an authorization one — and how to actually defend internal services.</div>

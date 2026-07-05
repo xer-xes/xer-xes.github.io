@@ -37,7 +37,7 @@
     </div>
     <div class="hero-stats">
       <div class="stat-item">
-        <div class="stat-num" id="machine-count">6</div>
+        <div class="stat-num" id="machine-count">7</div>
         <div class="stat-label">Machines Pwned</div>
       </div>
       <div class="stat-item">
@@ -45,7 +45,7 @@
         <div class="stat-label">CVEs Exploited</div>
       </div>
       <div class="stat-item">
-        <div class="stat-num" id="blog-count">3</div>
+        <div class="stat-num" id="blog-count">4</div>
         <div class="stat-label">Blog Posts</div>
       </div>
     </div>
@@ -71,7 +71,7 @@
         <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
-        <div class="t-success">Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
+        <div class="t-success">MakeSense/  Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
       </div>
@@ -87,6 +87,30 @@
       <p>Latest HackTheBox machines I've completed</p>
     </div>
     <div class="cards-grid">
+
+      <!-- MakeSense -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-medium">Medium</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">MakeSense</div>
+        <div class="card-desc">Client-trust chain on WordPress: a theme ships its own AES key, so a forged "voice message" stores an XSS an admin bot renders → admin account + plugin webshell. Config password reuse gives SSH, then a root OCR service that saves recognised text to a web-served .php lets Tesseract write the root webshell.</div>
+        <div class="card-tags">
+          <span class="tag">client-side crypto</span>
+          <span class="tag">stored XSS</span>
+          <span class="tag">admin bot</span>
+          <span class="tag">OCR RCE</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-07-05</span>
+          <a href="writeups/makesense.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
 
       <!-- Enigma -->
       <div class="machine-card">
@@ -137,29 +161,6 @@
         </div>
       </div>
 
-      <!-- Connected -->
-      <div class="machine-card">
-        <div class="card-header">
-          <div class="card-os-icon">🐧</div>
-          <div class="card-badges">
-            <span class="badge badge-easy">Easy</span>
-            <span class="badge badge-linux">Linux</span>
-            <span class="badge badge-pwned">✓ Pwned</span>
-          </div>
-        </div>
-        <div class="card-title">Connected</div>
-        <div class="card-desc">FreePBX VoIP box. Unauthenticated SQLi in the Endpoint Manager (CVE-2025-57819) → cron_jobs INSERT for RCE, then root via a writable incron hook whose signature file is also writable (CVE-2025-61678).</div>
-        <div class="card-tags">
-          <span class="tag">CVE-2025-57819</span>
-          <span class="tag">CVE-2025-61678</span>
-          <span class="tag">FreePBX</span>
-          <span class="tag">incron</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-date">2026-06-09</span>
-          <a href="writeups/connected.html" class="card-link">Read writeup &rarr;</a>
-        </div>
-      </div>
     <div style="text-align:center;margin-top:32px;">
       <a href="writeups.html" class="btn btn-ghost">View all writeups &rarr;</a>
     </div>

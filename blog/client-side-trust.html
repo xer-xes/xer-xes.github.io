@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Client Is Not Your Server // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      client-side-trust
+    </div>
+    <h1 style="margin-top:16px;">The Client Is Not Your Server: When Encryption Keys Ship in JavaScript</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-07-05 &nbsp;·&nbsp; web &nbsp;·&nbsp; appsec &nbsp;·&nbsp; htb-lessons</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>Rooting HackTheBox's <a href="../writeups/makesense.html">MakeSense</a> took a chain of four bugs, but the one that opened the door is a mistake I keep seeing in real code review: an application decided the <em>browser</em> should be responsible for security. It shipped an encryption key in JavaScript and did its input sanitisation client-side. This post is about why that class of decision is always fatal, and what "trust boundary" actually means once you strip the comforting abstractions away.</p>
+
+    <h2>The anti-pattern, in one file</h2>
+    <p>MakeSense's WordPress theme had a "leave a voice message" widget. It recorded audio, transcribed it <em>in the browser</em> with a local AI model, encrypted the result, and POSTed it to the server. The client-side wrapper contained this:</p>
+    <pre>// whisper-wrapper.js — served to every visitor
+const ENCRYPTION_KEY = 'bLs6z8iv3gWpsvyeabFosDjb4YQe7jdU13rI';
+
+async encryptPayload(payload) {
+  const keyMaterial = await crypto.subtle.digest('SHA-256', enc.encode(ENCRYPTION_KEY));
+  const iv  = crypto.getRandomValues(new Uint8Array(12));
+  const out = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, data);
+  return base64( iv || out );   // IV || ciphertext || tag
+}</pre>
+    <p>The server received the blob, decrypted it with the <em>same</em> key, and trusted the plaintext as a legitimately-recorded message. The intent was obvious: "the payload is encrypted, so only our app could have produced it." But every ingredient of that encryption — the key, the algorithm, the IV construction, the wire format — was sitting in a file the server hands to anyone who asks for it.</p>
+    <p>So I never touched the microphone. I read the key out of the JS, replicated the format in ten lines of Python, and encrypted whatever I wanted:</p>
+    <pre>KEY = hashlib.sha256(b'bLs6z8iv3gWpsvyeabFosDjb4YQe7jdU13rI').digest()
+iv  = get_random_bytes(12)
+ct, tag = AES.new(KEY, AES.MODE_GCM, nonce=iv).encrypt_and_digest(evil_payload)
+blob = base64.b64encode(iv + ct + tag)     # the server accepts this happily</pre>
+    <p>The "trusted" channel was a formality. And because the same theme also mapped spoken words to HTML symbols <em>on the client</em> — its own comment said "for XSS injection" — the payload I encrypted was a stored cross-site-scripting string. Encryption I controlled, wrapping sanitisation I controlled. Two locks, both with the key taped to the front.</p>
+
+    <h2>Why "client-side" is never a control</h2>
+    <p>The mental slip is treating the browser as part of your system. It isn't. The browser is <strong>the attacker's execution environment</strong>. Everything you send it — code, keys, validation rules, feature flags, "hidden" fields — is now data the attacker owns and can read, modify, replay, or ignore. Concretely, none of these is a security control:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>A key or secret in JS or a mobile bundle.</strong> Minification and obfuscation are speed bumps; <code>crypto.subtle</code> calls and string constants are trivially recovered. A symmetric key you shipped is a public value.</li>
+      <li><strong>Client-side validation and sanitisation.</strong> Length checks, regex filters, "disabled" buttons, HTML-escaping in JavaScript — all bypassed by talking to the API directly. Client validation is a UX feature; it improves error messages, nothing more.</li>
+      <li><strong>Signing/encrypting in the client to "prove" origin.</strong> If the client can compute it, so can I. Provenance can only be established by something the client never sees — a server-held key, a session bound to an authenticated identity.</li>
+      <li><strong>Hidden fields, price/role in the request, "internal" flags.</strong> If the server reads it from the request and trusts it, it's attacker-controlled input.</li>
+    </ul>
+    <p>The one honest question to ask of any client-side mechanism is: <em>"If the user rewrote this code, what breaks?"</em> If the answer is "our security," it was never security.</p>
+
+    <h2>What the client can legitimately do</h2>
+    <p>Client-side crypto and validation aren't <em>useless</em> — they're just not <em>trust</em> mechanisms. They're fine for:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Confidentiality in transit beyond TLS</strong>, only with keys the server never holds — true end-to-end encryption, where the server is deliberately unable to read the data (e.g. a per-user key derived from a password that never leaves the device).</li>
+      <li><strong>UX</strong> — instant feedback, fewer round-trips, optimistic UI.</li>
+      <li><strong>Reducing load</strong> — pre-filtering obviously-bad input before it hits the API, <em>in addition to</em> server checks.</li>
+    </ul>
+    <p>The tell for the anti-pattern is a <strong>shared secret</strong>: the moment the server needs the same key the client used, you've built obfuscation, not encryption. Real client-side confidentiality means the server <em>can't</em> decrypt — that's the whole point.</p>
+
+    <h2>Defending it</h2>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Move every trust decision server-side.</strong> Decrypt, authenticate, authorise, validate, and output-encode on the server. Assume the request was crafted by hand, because it can be.</li>
+      <li><strong>Never ship a secret you also verify against.</strong> If your architecture needs a shared key in the client, redesign it — use a server-side HMAC/signature the client can't forge, or a session bound to an authenticated user.</li>
+      <li><strong>Treat "internal", "encrypted", and "signed by our app" payloads as untrusted input.</strong> They earn no exemption from validation.</li>
+      <li><strong>Output-encode on render, everywhere — including admin and "internal" dashboards.</strong> The XSS in MakeSense fired against an automated <em>admin</em>. A CSP and context-aware encoding would have contained it regardless of how the data got in.</li>
+      <li><strong>Threat-model the data flow, not the UI flow.</strong> Draw where bytes cross from a machine you control to one you don't. That line — not the network edge, not "logged-in vs not" — is your trust boundary.</li>
+    </ul>
+
+    <h2>The takeaway</h2>
+    <p>"It's encrypted before it leaves the browser" and "the frontend won't allow that" are the same sentence dressed differently, and both answer the wrong question. The question isn't <em>what your code does</em> — it's <em>what someone who replaced your code can do.</em> Put the key, the check, and the decision on the server, and let the client be what it actually is: an untrusted, fully-inspectable, fully-rewritable window into your API.</p>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Blog</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>
