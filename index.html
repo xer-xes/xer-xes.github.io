@@ -71,7 +71,7 @@
         <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
-        <div class="t-success">Paperwork/  MakeSense/  Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
+        <div class="t-success">Bedside/  Paperwork/  MakeSense/  Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
       </div>
@@ -181,6 +181,31 @@
         <div class="card-footer">
           <span class="card-date">2026-07-04</span>
           <a href="writeups/enigma.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- SmartHIRE -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-medium">Medium</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">SmartHIRE</div>
+        <div class="card-desc">AI hiring platform running Flask + MLflow. Exploited pickle deserialization (CVE-2024-37054) for initial access, then escalated via Python .pth file hijack.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2024-37054</span>
+          <span class="tag">Pickle RCE</span>
+          <span class="tag">MLflow</span>
+          <span class="tag">.pth hijack</span>
+          <span class="tag">sudo privesc</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-06-28</span>
+          <a href="writeups/smarthire.html" class="card-link">Read writeup &rarr;</a>
         </div>
       </div>
 
