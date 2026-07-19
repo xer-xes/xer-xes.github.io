@@ -37,7 +37,7 @@
     </div>
     <div class="hero-stats">
       <div class="stat-item">
-        <div class="stat-num" id="machine-count">7</div>
+        <div class="stat-num" id="machine-count">8</div>
         <div class="stat-label">Machines Pwned</div>
       </div>
       <div class="stat-item">
@@ -71,7 +71,7 @@
         <div class="t-out">MLflow | Reverse Shells | CTF | Writeups</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">ls htb/machines/</span></div>
-        <div class="t-success">MakeSense/  Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
+        <div class="t-success">Paperwork/  MakeSense/  Enigma/  SmartHIRE/  Connected/  DevHub/  CCTV/  Reactor/</div>
         <br>
         <div><span class="t-prompt">rahul@sec</span>:~$ <span class="t-cmd">_</span><span style="animation:blink 1s step-end infinite;color:var(--green)">█</span></div>
       </div>
@@ -87,6 +87,54 @@
       <p>Latest HackTheBox machines I've completed</p>
     </div>
     <div class="cards-grid">
+
+      <!-- Bedside -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-medium">Medium</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">Bedside</div>
+        <div class="card-desc">Medical-imaging box where one deserialization bug shows up twice. CVE-2025-64512 (pdfminer.six CMap pickle) gives a Docker foothold; a Vite dev server path traversal leaks a host SSH key. Root via a sudo-run MONAI trainer that torch.load()s an attacker-planted checkpoint with weights_only=False.</div>
+        <div class="card-tags">
+          <span class="tag">CVE-2025-64512</span>
+          <span class="tag">pdfminer.six</span>
+          <span class="tag">Docker escape</span>
+          <span class="tag">torch.load RCE</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-07-19</span>
+          <a href="writeups/bedside.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Paperwork -->
+      <div class="machine-card">
+        <div class="card-header">
+          <div class="card-os-icon">🐧</div>
+          <div class="card-badges">
+            <span class="badge badge-easy">Easy</span>
+            <span class="badge badge-linux">Linux</span>
+            <span class="badge badge-pwned">✓ Pwned</span>
+          </div>
+        </div>
+        <div class="card-title">Paperwork</div>
+        <div class="card-desc">Print-queue-themed box built on bespoke Python services. A custom RFC 1179 line-printer daemon injects the job name into a shell command for a foothold; a path-traversal bug in a hand-rolled JetDirect/PJL emulator plants an SSH key for a second user. Root falls when a "security" watchdog leaks a live root file descriptor over a Unix socket that doubles as root's own login password.</div>
+        <div class="card-tags">
+          <span class="tag">command injection</span>
+          <span class="tag">RFC 1179</span>
+          <span class="tag">path traversal</span>
+          <span class="tag">SCM_RIGHTS</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-date">2026-07-19</span>
+          <a href="writeups/paperwork.html" class="card-link">Read writeup &rarr;</a>
+        </div>
+      </div>
 
       <!-- MakeSense -->
       <div class="machine-card">
@@ -133,31 +181,6 @@
         <div class="card-footer">
           <span class="card-date">2026-07-04</span>
           <a href="writeups/enigma.html" class="card-link">Read writeup &rarr;</a>
-        </div>
-      </div>
-
-      <!-- SmartHIRE -->
-      <div class="machine-card">
-        <div class="card-header">
-          <div class="card-os-icon">🐧</div>
-          <div class="card-badges">
-            <span class="badge badge-medium">Medium</span>
-            <span class="badge badge-linux">Linux</span>
-            <span class="badge badge-pwned">✓ Pwned</span>
-          </div>
-        </div>
-        <div class="card-title">SmartHIRE</div>
-        <div class="card-desc">AI hiring platform running Flask + MLflow. Exploited pickle deserialization (CVE-2024-37054) for initial access, then escalated via Python .pth file hijack.</div>
-        <div class="card-tags">
-          <span class="tag">CVE-2024-37054</span>
-          <span class="tag">Pickle RCE</span>
-          <span class="tag">MLflow</span>
-          <span class="tag">.pth hijack</span>
-          <span class="tag">sudo privesc</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-date">2026-06-28</span>
-          <a href="writeups/smarthire.html" class="card-link">Read writeup &rarr;</a>
         </div>
       </div>
 

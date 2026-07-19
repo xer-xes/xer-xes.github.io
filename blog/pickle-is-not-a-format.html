@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Every .pt File Is a .pickle File // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      pickle-is-not-a-format
+    </div>
+    <h1 style="margin-top:16px;">Every .pt File Is a .pickle File: Two RCEs From the Same Root Cause</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-07-19 &nbsp;·&nbsp; python &nbsp;·&nbsp; deserialization &nbsp;·&nbsp; ml security</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>On HackTheBox's <a href="../writeups/bedside.html">Bedside</a>, the same bug got me in twice, wearing two different costumes. The foothold was a "PDF font resource" that turned out to be a pickle. The privilege escalation was a "model checkpoint" that turned out to be a pickle. Neither codebase thought of itself as doing deserialization — one thought it was parsing fonts, the other thought it was loading weights. That gap between what a format is <em>called</em> and what it <em>does</em> is the whole story.</p>
+
+    <h2>Instance one: a CMap is not a CMap</h2>
+    <p>pdfminer.six resolves a PDF font's <code>/Encoding</code> entry by treating it as a path to a CMap resource. CVE-2025-64512 is what happens when that resolution isn't constrained to the library's bundled CMap directory: point it somewhere else, and pdfminer reads the target bytes and hands them to <code>pickle.loads()</code>, with no check that the result is actually CMap data.</p>
+    <pre>class RCE:
+    def __init__(self, cmd): self.cmd = cmd
+    def __reduce__(self): return (os.system, (self.cmd,))
+
+gzip.compress(pickle.dumps(RCE(cmd)))   # this is the "CMap resource"</pre>
+    <p>Nothing here parses a font encoding table. It's <code>pickle.loads()</code> wearing a <code>.gz</code> extension and a font-resource code path, reached by a completely unrelated feature — text extraction from an uploaded PDF.</p>
+
+    <h2>Instance two: a checkpoint is not a checkpoint</h2>
+    <p>The privilege escalation on the same box is a MONAI/PyTorch training script that sudo lets a low-privileged user run as root. Before training starts, it loads the most recently modified file in a checkpoint directory through MONAI's <code>CheckpointLoader</code>:</p>
+    <pre># monai/handlers/checkpoint_loader.py
+checkpoint = torch.load(self.load_path, map_location=self.map_location, weights_only=False)</pre>
+    <p><code>torch.save()</code>/<code>torch.load()</code> are, underneath the model-training framing, a thin wrapper around <code>pickle</code>. A <code>.pt</code> file doesn't contain "tensors" in any format-constrained sense the way a JPEG contains pixels — it contains a pickle stream that, when replayed, issues instructions to reconstruct arbitrary Python objects, including a call to whatever <code>__reduce__</code> says to call. PyTorch 2.6 made <code>weights_only=True</code> the default specifically because this had become a well-known attack class in the ML ecosystem — but MONAI's wrapper passes <code>weights_only=False</code> explicitly, so upgrading torch alone wouldn't have closed this one.</p>
+
+    <h2>The pattern, not the CVE</h2>
+    <p>Neither of these is really "a pdfminer bug" or "a MONAI bug" in isolation. They're the same bug: a codebase treats a byte stream as inert data because the surrounding code — a font loader, a training script — has no reason to think of itself as running a deserializer. Anything built on Python's pickle protocol has this property whether or not the API name says so:</p>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><code>pickle.load</code> / <code>pickle.loads</code> — the obvious case</li>
+      <li><code>torch.load</code> (pre-2.6 default, or any wrapper that passes <code>weights_only=False</code>)</li>
+      <li><code>joblib.load</code>, <code>dill.load</code> — pickle-compatible by design</li>
+      <li>anything with its own "resource cache" that happens to use pickle internally for speed, the way pdfminer's CMap loader does</li>
+    </ul>
+    <p>The file extension, the surrounding domain vocabulary ("font resource," "model checkpoint"), and the framework's own trust in its file format are all irrelevant to what actually executes. If the bytes came from a lower-trust source — an upload, a shared directory, anything not written by the same process reading it back — the question is never "is this a safe format," it's "does the loader call pickle anywhere in its call graph."</p>
+
+    <h2>What actually helps</h2>
+    <ul style="margin-left:20px;color:var(--text);line-height:2;">
+      <li><strong>Prefer non-executable serialization formats for anything crossing a trust boundary.</strong> <a href="https://github.com/huggingface/safetensors" target="_blank">safetensors</a> for model weights, JSON/protobuf for structured data — formats where the parser cannot be tricked into calling arbitrary code no matter what bytes it's given.</li>
+      <li><strong>Don't trust a library default to survive a wrapper.</strong> <code>torch.load</code>'s safer default is meaningless if something upstream of your call passes <code>weights_only=False</code> for you. Audit the actual call, not the framework's changelog.</li>
+      <li><strong>Treat any directory writable by a lower-trust process as attacker-controlled input</strong> the moment something higher-privileged reads from it — regardless of whether that reader calls it a "cache," a "checkpoint," or a "resource."</li>
+    </ul>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Notes</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>

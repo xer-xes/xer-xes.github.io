@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A File Descriptor Is a Capability // Rahul Sharma</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="../assets/css/style.css">
+  <script src="../assets/js/theme.js"></script>
+</head>
+<body>
+
+<nav>
+  <div class="container nav-inner">
+    <div class="nav-logo"><a href="../index.html" style="color:inherit;">rahul<span>@sec</span>:~$</a></div>
+    <div class="nav-links">
+      <a href="../index.html">home</a>
+      <a href="../writeups.html">writeups</a>
+      <a href="../blog.html" class="active">blog</a>
+      <button id="theme-toggle" class="theme-toggle" type="button">☀</button>
+    </div>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a href="../index.html">~</a><span class="sep">/</span>
+      <a href="../blog.html">blog</a><span class="sep">/</span>
+      fd-is-a-capability
+    </div>
+    <h1 style="margin-top:16px;">A File Descriptor Is a Capability: What SCM_RIGHTS Actually Hands Over</h1>
+    <p style="color:var(--text-dim);margin-top:8px;font-family:var(--font-mono);font-size:0.85rem;">2026-07-19 &nbsp;·&nbsp; linux &nbsp;·&nbsp; ipc &nbsp;·&nbsp; privesc</p>
+  </div>
+
+  <div class="writeup-body">
+    <p>On HackTheBox's <a href="../writeups/paperwork.html">Paperwork</a>, a root-owned "security" daemon watched a log file for signs of abuse, and if it saw something bad, it politely sent an alert. That alert included, as an attachment, a live file descriptor into a root-only secrets file — opened by root, handed to whoever was listening. This post is about the mechanism that makes that possible, because it's a much bigger idea than one HTB box: in Unix, <strong>permission checks happen once, at <code>open()</code>. Everything after that is just a reference, and references are transferable.</strong></p>
+
+    <h2>The "security" feature that leaked root's password</h2>
+    <p>At startup, <code>paperwork-daemon</code> (running as root) does this once and keeps the result for its entire lifetime:</p>
+    <pre>admin_fd = os.open("/etc/paperwork/admin_pins.conf", os.O_RDONLY)   # root, at boot; file is 0600</pre>
+    <p>Nothing unusual — plenty of daemons hold a config file open. The trouble starts in its incident-response path. On every connection to its management socket, it checks a log for suspicious commands; if it finds them, instead of just raising a flag, it does this:</p>
+    <pre>def trigger_lockdown(conn):
+    log_fd = os.open(LOG_PATH, os.O_RDONLY)
+    evidence_bundle = array.array("i", [log_fd, admin_fd])
+    conn.sendmsg([b"ALERT: SECURITY_VIOLATION..."],
+                 [(socket.SOL_SOCKET, socket.SCM_RIGHTS, evidence_bundle)])</pre>
+    <p><code>SCM_RIGHTS</code> is ancillary data you can attach to a message sent over a Unix domain socket, and it does something no other IPC primitive does casually: it duplicates an open file descriptor into the <em>receiving</em> process's own descriptor table. The receiver doesn't get a copy of the bytes, and it doesn't get a path it then has to <code>open()</code> itself (which would trigger a fresh permission check). It gets the exact same kernel-level open file description root created — with root's access already baked in, permanently:</p>
+    <pre>s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect("/run/paperwork/mgmt.sock")
+msg, ancdata, flags, addr = s.recvmsg(4096, socket.CMSG_LEN(2 * 4))
+for level, type_, data in ancdata:
+    if type_ == socket.SCM_RIGHTS:
+        fds = array.array("i"); fds.frombytes(data)
+
+os.pread(fds[1], 4096, 0)
+# b'ADMIN_PASSWORD=ApparelMortuaryCedar22'</pre>
+    <p>The receiving user — <code>archivist</code> — has zero OS-level permission to read <code>admin_pins.conf</code>. It doesn't matter. The socket's own permissions (<code>root:archivist</code>, mode <code>0660</code>) were the only real gate here, and they were built on an assumption: that only trustworthy, archivist-owned code would ever be the one connecting. That assumption held right up until <code>archivist</code>'s own service turned out to have a completely unrelated path-traversal bug and got compromised first.</p>
+
+    <h2>Why the check doesn't survive <code>open()</code></h2>
+    <p>This isn't a bug specific to this daemon — it's how the primitive is supposed to work, which is exactly why it's dangerous when it crosses a trust boundary by accident. A few things fall out of the same mechanic:</p>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Discretionary access control is checked at open, not at read/write.</strong> The kernel evaluates permission bits (or ACLs) when a file description is created. Every subsequent <code>read()</code>, <code>write()</code>, or <code>pread()</code> on that same descriptor just uses the access already granted — there's no "are you still allowed to do this" re-check.</li>
+      <li><strong>This is <em>why</em> setuid-root programs can drop privileges and keep working.</strong> Open your privileged files first, call <code>setuid(getuid())</code>, and the already-open descriptors keep functioning exactly as before. The privilege drop is real for anything <em>not yet open</em> — and irrelevant for anything that already is.</li>
+      <li><strong>Passing the fd to another process is identical, just across a process boundary instead of a privilege-drop.</strong> <code>SCM_RIGHTS</code> gives the receiver a new descriptor number pointing at the same open file description. From the kernel's point of view, root already decided this file is readable; who's holding the descriptor now is not part of that decision.</li>
+      <li><strong>"We only sent a reference, not the data" is not a mitigation.</strong> A reference to an already-open, already-authorized file <em>is</em> the data — and with an <code>O_RDWR</code> descriptor, it's write access too.</li>
+    </ul>
+
+    <h2>Where this shows up outside CTF boxes</h2>
+    <p>Fd-passing is a legitimate, widely-used pattern — which is exactly why the mistake is easy to make. systemd's socket activation hands a bound listening socket from PID 1 to a freshly-started service over <code>LISTEN_FDS</code>. Container runtimes and privilege-separated daemons (OpenSSH's, sudo's, various browser sandboxes) pass fds across a fork to hand a lower-privileged worker exactly the resources it needs, no more. D-Bus and polkit make the same class of "who's allowed to be on the other end of this connection" decision that <code>paperwork-daemon</code>'s socket permissions were trying to make. All of these are safe <em>when the set of processes allowed to be on the other end is as trusted as the fd being sent</em> — and unsafe the moment one of those processes has its own, unrelated attack surface.</p>
+
+    <h2>Defending it</h2>
+    <ul style="margin-left:20px;line-height:2;">
+      <li><strong>Don't pass a privileged fd to disclose information — send the information.</strong> If the goal was "show the evidence," read the bytes you intend to disclose server-side and send <em>those</em>, after making your own access-control decision about what's safe to reveal. A descriptor grants everything the file allows, not just the part you meant to show.</li>
+      <li><strong>Audit every process allowed to connect to a privileged socket as if it already has whatever the socket can send.</strong> Unix permissions and <code>SO_PEERCRED</code> checks define who can connect — treat that set as your actual trust boundary, not the process that opened the file.</li>
+      <li><strong>If a process in that trusted set has its own remote or local attack surface, your trust boundary now includes that attack surface too.</strong> <code>archivist</code> was "trusted" to talk to <code>mgmt.sock</code> — but <code>archivist</code>'s JetDirect service was reachable and exploitable, so the boundary was really whoever could compromise JetDirect.</li>
+      <li><strong>Review incident-response and "helpful" debug paths as carefully as normal logic.</strong> The lockdown/alerting branch here was clearly never held to the same scrutiny as the daemon's everyday behavior — which is common, because it's the code path everyone assumes never runs.</li>
+      <li><strong>Treat <code>SCM_RIGHTS</code> usage as a loud, auditable event.</strong> It's rare enough in ordinary application code that a security-sensitive daemon sending or receiving ancillary rights data is itself worth alerting on.</li>
+    </ul>
+
+    <h2>The takeaway</h2>
+    <p>Unix's permission model answers one question — <em>can this file be opened</em> — and answers it exactly once. Everything downstream of that trusts the descriptor, forever, no matter whose hands it ends up in. Socket activation, privilege separation, and "attach the evidence" code all rely on that same fact; the difference between a clean design and a privilege-escalation bug is entirely about who you let hold the descriptor afterward. Don't pass what you wouldn't paste.</p>
+
+    <div style="margin-top:48px;padding-top:24px;border-top:1px solid var(--border);">
+      <a href="../blog.html" class="btn btn-ghost">&larr; Back to Blog</a>
+    </div>
+  </div>
+</div>
+
+<br><br>
+<footer>
+  <div class="container">
+    © 2026 <span>Rahul Sharma</span> &nbsp;·&nbsp; Security Engineer &nbsp;·&nbsp; HackTheBox writeups &amp; defensive security notes
+  </div>
+</footer>
+
+</body>
+</html>
